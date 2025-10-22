@@ -89,7 +89,9 @@ def deploy_logrotate_config():
     dateext
     dateformat -%Y-%m-%d
     postrotate
-        /bin/kill -HUP `cat /var/run/suricata.pid 2>/dev/null` 2>/dev/null || true
+        for pidfile in /var/run/suricata*.pid; do
+            [ -f "$pidfile" ] && /bin/kill -HUP $(cat "$pidfile" 2>/dev/null) 2>/dev/null || true
+        done
     endscript
 }}
 
@@ -105,7 +107,9 @@ def deploy_logrotate_config():
     dateext
     dateformat -%Y-%m-%d
     postrotate
-        /bin/kill -HUP `cat /var/run/suricata.pid 2>/dev/null` 2>/dev/null || true
+        for pidfile in /var/run/suricata*.pid; do
+            [ -f "$pidfile" ] && /bin/kill -HUP $(cat "$pidfile" 2>/dev/null) 2>/dev/null || true
+        done
     endscript
 }}
 """.strip()

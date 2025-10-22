@@ -1,0 +1,163 @@
+<!-- Local Decoders -->
+
+<!-- Modify it at your will. -->
+<!-- Copyright (C) 2015, Wazuh Inc. -->
+
+<!--
+  - Allowed static fields:
+  - location   - where the log came from (only on FTS)
+  - srcuser    - extracts the source username
+  - dstuser    - extracts the destination (target) username
+  - user       - an alias to dstuser (only one of the two can be used)
+  - srcip      - source ip
+  - dstip      - dst ip
+  - srcport    - source port
+  - dstport    - destination port
+  - protocol   - protocol
+  - id         - event id
+  - url        - url of the event
+  - action     - event action (deny, drop, accept, etc)
+  - status     - event status (success, failure, etc)
+  - extra_data - Any extra data
+-->
+
+<decoder name="local_decoder_example">
+    <program_name>local_decoder_example</program_name>
+</decoder>
+
+
+<decoder name="decoder_bash">
+   <program_name>user_command</program_name>
+</decoder>
+
+<decoder name="decoder_bash_log">
+  <parent>decoder_bash</parent>
+  <regex>[(\S+)] (\d+) [(\.+)] [(\d+.\d+.\d+.\d+)|(\S+)] (\.*)</regex>
+  <order>pwd, number, time, ip, command</order>
+</decoder>
+
+<!-- CPU, memory, disk metric -->
+<decoder name="general_health_check">
+     <program_name>general_health_check</program_name>
+</decoder>
+
+<decoder name="general_health_check1">
+  <parent>general_health_check</parent>
+  <prematch>ossec: output: 'general_health_metrics':\.</prematch>
+  <regex offset="after_prematch">(\S+) (\S+) (\S+)</regex>
+  <order>cpu_usage_%, memory_usage_%, disk_usage_%</order>
+</decoder>
+
+<!-- load average metric -->
+<decoder name="load_average_check">
+     <program_name>load_average_check</program_name>
+</decoder>
+
+<decoder name="load_average_check1">
+  <parent>load_average_check</parent>
+  <prematch>ossec: output: 'load_average_metrics':\.</prematch>
+  <regex offset="after_prematch">(\S+), (\S+), (\S+)</regex>
+  <order>1min_loadAverage, 5mins_loadAverage, 15mins_loadAverage</order>
+</decoder>
+
+<!-- Memory metric -->
+<decoder name="memory_check">
+     <program_name>memory_check</program_name>
+</decoder>
+
+<decoder name="memory_check1">
+  <parent>memory_check</parent>
+  <prematch>ossec: output: 'memory_metrics':\.</prematch>
+  <regex offset="after_prematch">(\S+) (\S+)</regex>
+  <order>memory_used_bytes, memory_available_bytes</order>
+</decoder>
+
+<!-- Disk metric -->
+<decoder name="disk_check">
+     <program_name>disk_check</program_name>
+</decoder>
+
+<decoder name="disk_check1">
+  <parent>disk_check</parent>
+  <prematch>ossec: output: 'disk_metrics':\.</prematch>
+  <regex offset="after_prematch">(\S+) (\S+)</regex>
+  <order>disk_used_bytes, disk_free_bytes</order>
+</decoder>
+
+<!-- Active User -->
+<decoder name="current_active_users">
+     <program_name>current_active_users</program_name>
+</decoder>
+
+<decoder name="current_active_users1">
+  <parent>current_active_users</parent>
+  <prematch>ossec: output: 'current_active_users':\.</prematch>
+  <regex offset="after_prematch">(\S+) (\S+) (\S+) (\S+)</regex>
+  <order>user, tty, from, login</order>
+</decoder>
+
+<!-- Active User Number -->
+<decoder name="current_active_user_number">
+     <program_name>current_active_user_number</program_name>
+</decoder>
+
+<decoder name="current_active_user_number1">
+  <parent>current_active_user_number</parent>
+  <prematch>ossec: output: 'current_active_user_number':\.</prematch>
+  <regex offset="after_prematch">(\S+)</regex>
+  <order>active_users</order>
+</decoder>
+
+<!-- Bash Commands -->
+<decoder name="bash_commands">
+  <program_name>bash_commands</program_name>
+</decoder>
+
+<decoder name="bash_commands1">
+  <parent>bash_commands</parent>
+  <prematch>\.</prematch> 
+  <regex>Container (\S+) User (\S+) @ (\S+) Exit (\S+) \p\d+\p:(\.+)</regex>
+  <order>Container, User, WD, Exit, Command</order>
+</decoder>
+
+<!-- UFW Status -->
+<decoder name="ufw_status">
+     <program_name>ufw_status</program_name>
+</decoder>
+<decoder name="ufw_status1">
+  <parent>ufw_status</parent>
+  <prematch>ossec: output: 'ufw_status':</prematch>
+  <regex offset="after_prematch">\s+(\S+\s\S*)\s+(\S+)\s+(\.+)|\s*(\S+)\s*(\S+)\s*(\S+)</regex>
+  <order>To, Action, From</order>
+</decoder>
+
+<!-- Agents -->
+<decoder name="current_agents">
+     <program_name>current_agents</program_name>
+</decoder>
+<decoder name="current_agents1">
+  <parent>current_agents</parent>
+  <prematch></prematch>
+  <regex offset="after_prematch">D: (\d+), Name: (\S+), IP: (\S+)</regex>
+  <order>ID, Name, IP</order>
+</decoder>
+
+<!-- OpenVPN -->
+<decoder name="openvpnas_decoder">
+    <prematch type="pcre2">\[OVPN \d+\] </prematch>
+</decoder>
+<decoder name="openvpnas_decoder_child">
+    <parent>openvpnas_decoder</parent>
+    <regex type="pcre2">(\d\d\d\d-\d\d-\d\d\w\d\d:\d\d:\d\d.\d\d\d\d)</regex>
+    <order>timestamp</order>
+</decoder>
+<decoder name="openvpnas_decoder_child">
+    <parent>openvpnas_decoder</parent>
+    <regex type="pcre2">(\d+\.\d+\.\d+\.\d+):(\d+) \[(\S+)\]</regex>
+    <order>srcip, srcport, srcuser</order>
+</decoder>
+<decoder name="openvpnas_decoder_child">
+    <parent>openvpnas_decoder</parent>
+    <regex type="pcre2">Peer Connection (\w+) with \[(\w+)\]</regex>
+    <order>action, interface</order>
+</decoder>

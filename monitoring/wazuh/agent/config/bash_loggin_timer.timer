@@ -1,0 +1,15 @@
+[Unit]
+Description=Setup Bash Command Logging Timer
+Requires=bash_loggin_systemd.service
+
+[Timer]
+# Run 30 seconds after boot
+OnBootSec=30s
+# Then run every 30 seconds
+OnUnitActiveSec=30s
+# Also run on calendar time (every 30s)
+OnCalendar=*:*:0,30
+Unit=bash_loggin_systemd.service
+
+[Install]
+WantedBy=timers.target

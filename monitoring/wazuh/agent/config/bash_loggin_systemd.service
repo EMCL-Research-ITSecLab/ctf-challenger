@@ -1,0 +1,19 @@
+[Unit]
+Description=Setup Bash Command Logging
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+# Path to your setup script
+ExecStart=/etc/monitoring/bash_loggin_set_up.sh
+RemainAfterExit=no
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

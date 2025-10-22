@@ -1,0 +1,25 @@
+<ossec_config>
+  <localfile>
+    <log_format>journald</log_format>
+    <location>journald</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/ossec/logs/active-responses.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/dpkg.log</location>
+  </localfile>
+
+<!-- Active Agents-->
+  <localfile>
+     <log_format>command</log_format>
+     <command>/var/ossec/bin/manage_agents -l | awk 'NR > 2'| sed  '$d'</command>
+     <alias>current_agents</alias>
+     <out_format>$(timestamp) $(hostname) current_agents: $(log)</out_format>
+     <frequency>30</frequency>
+  </localfile>
+</ossec_config>

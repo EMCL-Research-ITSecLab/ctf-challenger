@@ -1,0 +1,58 @@
+<ossec_config>
+
+  <localfile>
+    <log_format>journald</log_format>
+    <location>journald</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/ossec/logs/active-responses.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/dpkg.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/lib/docker/volumes/heidpi_var_log/_data/flow_event.json</location>
+  </localfile>
+
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/lib/docker/volumes/heidpi_var_log/_data/packet_event.json</location>
+  </localfile>
+
+<!--Bash Command Log -->
+  <localfile>
+    <location>/var/log/commands.log</location>
+    <log_format>syslog</log_format>
+  </localfile>
+
+<!-- Current Active User Full-->
+  <localfile>
+     <log_format>command</log_format>
+     <command>w -h | awk '{print $1,$2,$3,$4}'</command>
+     <alias>current_active_users</alias>
+     <out_format>$(timestamp) $(hostname) current_active_users: $(log)</out_format>
+     <frequency>30</frequency>
+  </localfile>
+
+<!-- Current Active User -->
+  <localfile>
+     <log_format>full_command</log_format>
+     <command>users | wc -w</command>
+     <alias>current_active_user_number</alias>
+     <out_format>$(timestamp) $(hostname) current_active_user_number: $(log)</out_format>
+     <frequency>30</frequency>
+  </localfile>
+
+<!-- OpenVPN -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/openvpnas.log</location>
+  </localfile>
+
+</ossec_config>

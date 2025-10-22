@@ -1,0 +1,43 @@
+ctf:
+  name: <CTF_NAME>
+  description: <CTF_DESCRIPTION>
+  hint: <CTF_OVERVIEW_HINT>
+  solution: <CTF_SOLUTION>
+  category: <CATEGORY>      # ['web', 'crypto', 'reverse', 'forensics', 'pwn', 'misc']
+  difficulty: <DIFFICULTY>  # ['easy', 'medium', 'hard']
+  is_active: <true|false>
+
+  vms:
+    <vm_name_1>: # Irrelevant for the platform, just needed in the php backend
+      ova_name: <OVA_NAME_1>
+      ova_path: <OVA_PATH_1>
+      cores: <NUM_CORES>
+      ram_gb: <RAM_GB>
+      domain_name: <DOMAIN_NAME_1>
+    # ...
+
+  subnets:
+    <subnet_name_1>: # Irrelevant for the platform, just needed in the php backend
+      dmz: <true|false>
+      accessible: <true|false>
+      attached_vms: [
+        <vm_name_1>,
+        <vm_name_2>,
+        ...
+      ]
+    # ...
+
+  flags:
+    flag<index>: # Completely irrelevant, any valid label in YAML is fine
+      flag: <FLAG_VALUE>
+      description: <FLAG_DESCRIPTION>
+      points: <POINTS>
+      order_index: <INDEX>
+    # ...
+
+  hints:
+    hint<index>: # Completely irrelevant, any valid label in YAML is fine
+      hint_text: <HINT_VALUE>
+      unlock_points: <POINTS_TO_UNLOCK>
+      order_index: <INDEX>
+    # ...

@@ -1,5 +1,6 @@
 from proxmox_api_calls import delete_vm_api_call, stop_vm_api_call
 from DatabaseClasses import ChallengeTemplate, MachineTemplate, Challenge, Machine
+import subprocess
 
 
 def delete_machine_templates(challenge_template_id, db_conn):
@@ -59,7 +60,7 @@ def fetch_running_challenges_and_machines(challenge_template, db_conn):
         cursor.execute("SELECT id, subnet FROM challenges WHERE challenge_template_id = %s", (challenge_template.id,))
 
         for challenge_id, subnet in cursor.fetchall():
-            challenge = Challenge(challenge_id=challenge_id[0], template=challenge_template, subnet=subnet)
+            challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=subnet)
             challenges.append(challenge)
 
     for challenge in challenges:
@@ -98,7 +99,9 @@ def delete_machines(challenges):
             try:
                 delete_vm_api_call(machine)
             except Exception:
-                continue
+                subprocess.run(["qm", "stop", str(machine.id)], check=False, capture_output=True)
+                subprocess.run(["qm", "unlock", str(machine.id)], check=True, capture_output=True)
+                subprocess.run(["qm", "destroy", str(machine.id)], check=True, capture_output=True)
 
 
 def delete_machine_template_vms(challenge_template):
@@ -110,4 +113,6 @@ def delete_machine_template_vms(challenge_template):
         try:
             delete_vm_api_call(machine_template)
         except Exception:
-            continue
+            subprocess.run(["qm", "stop", str(machine_template.id)], check=False, capture_output=True)
+            subprocess.run(["qm", "unlock", str(machine_template.id)], check=True, capture_output=True)
+            subprocess.run(["qm", "destroy", str(machine_template.id)], check=True, capture_output=True)

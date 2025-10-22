@@ -2,7 +2,23 @@ from DatabaseClasses import *
 from proxmox_api_calls import *
 import subprocess
 import os
+import time
+import requests
+import urllib3
 from tenacity import retry, stop_after_attempt, wait_fixed
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
+CHALLENGES_ROOT_SUBNET = os.getenv("CHALLENGES_ROOT_SUBNET", "10.128.0.0")
+CHALLENGES_ROOT_SUBNET_MASK = os.getenv("CHALLENGES_ROOT_SUBNET_MASK", "255.128.0.0")
+CHALLENGES_ROOT_SUBNET_MASK_INT = sum(bin(int(x)).count('1') for x in CHALLENGES_ROOT_SUBNET_MASK.split('.'))
+CHALLENGES_ROOT_SUBNET_CIDR = f"{CHALLENGES_ROOT_SUBNET}/{CHALLENGES_ROOT_SUBNET_MASK_INT}"
+
+MONITORING_HOST = os.getenv("MONITORING_HOST", "10.0.0.103")
+WAZUH_PORT = os.getenv("WAZUH_API_PORT", "55000")
+WAZUH_USER = os.getenv("WAZUH_API_USER", "wazuh-wui")
+WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 
 DNSMASQ_INSTANCES_DIR = "/etc/dnsmasq-instances"
 
@@ -19,6 +35,8 @@ def stop_challenge(user_id, db_conn):
 
         stop_machines(challenge)
 
+        delete_machines(challenge)
+
         fetch_networks(challenge, db_conn)
 
         delete_network_devices(challenge)
@@ -27,7 +45,7 @@ def stop_challenge(user_id, db_conn):
 
         stop_dnsmasq_instances(challenge)
 
-        delete_machines(challenge)
+        remove_challenge_from_wazuh(challenge)
 
         remove_database_entries(challenge, user_id, db_conn)
 
@@ -105,6 +123,76 @@ def fetch_networks(challenge, db_conn):
                 challenge.networks[network_id].add_connection(connection)
 
 
+def delete_wazuh_agent(machine_id):
+    """
+    Delete a Wazuh agent by machine ID using Wazuh Manager API.
+
+    Args:
+        machine_id: The VM ID used to identify the agent
+
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    agent_name = f"agent_{machine_id}"
+    base_url = f"https://{MONITORING_HOST}:{WAZUH_PORT}"
+
+    try:
+        auth_response = requests.post(
+            f"{base_url}/security/user/authenticate?raw=true",
+            auth=(WAZUH_USER, WAZUH_PASSWORD),
+            verify=False,
+            timeout=10
+        )
+
+        if auth_response.status_code != 200:
+            return False
+
+        token = auth_response.text.strip()
+        headers = {"Authorization": f"Bearer {token}"}
+
+        search_response = requests.get(
+            f"{base_url}/agents",
+            headers=headers,
+            params={"name": agent_name},
+            verify=False,
+            timeout=10
+        )
+
+        if search_response.status_code != 200:
+            return False
+
+        data = search_response.json()
+        agents = data.get("data", {}).get("affected_items", [])
+
+        if not agents:
+            return False
+
+        agent_id = agents[0]["id"]
+
+        delete_response = requests.delete(
+            f"{base_url}/agents",
+            headers=headers,
+            params={
+                "agents_list": agent_id,
+                "status": "all",
+                "older_than": "0s"
+            },
+            verify=False,
+            timeout=10
+        )
+
+        if delete_response.status_code == 200:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        return False
+
+
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(1))
 def stop_machines(challenge):
     """
@@ -118,17 +206,13 @@ def stop_machines(challenge):
             existing_machines[machine.id] = machine
 
     for machine in existing_machines.values():
-        try:
-            stop_vm_api_call(machine)
-        except Exception:
-            pass
+        stop_vm_api_call(machine)
 
     all_machines_stopped = True
     for machine in existing_machines.values():
         try:
             if not vm_is_stopped_api_call(machine):
                 all_machines_stopped = False
-                break
         except Exception:
             all_machines_stopped = False
 
@@ -182,55 +266,78 @@ def delete_network_devices(challenge):
     reload_network_api_call()
 
 
+def wait_for_network_devices_deletion(challenge, try_timeout=3, max_tries=10):
+    """
+    Wait for the networks for a challenge to be deleted.
+    """
+
+    all_networks_deleted = False
+    tries = 0
+    while not all_networks_deleted and tries < max_tries:
+        tries += 1
+        try_start = time.time()
+
+        while not time.time() - try_start < try_timeout and not all_networks_deleted:
+            all_networks_deleted = True
+            for network in challenge.networks.values():
+                if os.path.exists(f"/sys/class/net/{network.host_device}"):
+                    all_networks_deleted = False
+
+        if not all_networks_deleted:
+            reload_network_api_call()
+
+    if not all_networks_deleted:
+        raise Exception(f"Not all network devices could be deleted. Existing devices: {', '.join(str(n.host_device) for n in challenge.networks.values() if network_device_exists_api_call(n))}.")
+
+
 def delete_iptables_rules(challenge, user_vpn_ip):
     """
     Remove iptables rules previously added for the given user VPN IP.
     """
 
     for network in challenge.networks.values():
-        if network.is_dmz:
-            # Allow traffic from the DMZ to the outside
-            subprocess.run(
-                ["iptables", "-D", "FORWARD", "-i", "vmbr0", "-o", network.host_device, "-d", network.subnet, "-m",
-                 "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"], capture_output=True)
-            subprocess.run(
-                ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", "vmbr0", "-s", network.subnet, "-m",
-                 "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"], capture_output=True)
-            subprocess.run(
-                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-s", network.subnet, "-o", "vmbr0", "-j", "MASQUERADE"],
-                capture_output=True)
-
-        if network.accessible:
-            # Disallow traffic to the router IP
-            subprocess.run(["iptables", "-D", "INPUT", "-i", "tun0", "-d", network.router_ip, "-j", "DROP"],
-                           capture_output=True)
-            for network_connection in network.connections.values():
-                # Allow traffic from the user VPN IP to the client IP
-                subprocess.run(
-                    ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", "tun0", "-d", user_vpn_ip, "-s",
-                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
-                     "ACCEPT"], capture_output=True)
-                subprocess.run(
-                    ["iptables", "-D", "FORWARD", "-i", "tun0", "-o", network.host_device, "-s", user_vpn_ip, "-d",
-                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
-                     "ACCEPT"], capture_output=True)
-
-        # Disallow traffic to the router IP
-        subprocess.run(["iptables", "-D", "INPUT", "-i", network.host_device, "-d", network.router_ip, "-j", "DROP"],
-                       capture_output=True)
+        # Allow intra-network traffic
         subprocess.run(
-            ["iptables", "-D", "INPUT", "-i", network.host_device, "-d", network.router_ip, "-p", "tcp", "--dport",
-             "53", "-j", "ACCEPT"], capture_output=True)
+            ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", network.host_device, "-j", "ACCEPT"],
+            check=False, capture_output=True)
 
         # Allow DNS traffic to the router IP
         subprocess.run(
             ["iptables", "-D", "INPUT", "-i", network.host_device, "-d", network.router_ip, "-p", "udp", "--dport",
-             "53", "-j", "ACCEPT"], capture_output=True)
-
-        # Allow intra-network traffic
+             "53", "-j", "ACCEPT"], check=False, capture_output=True)
         subprocess.run(
-            ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", network.host_device, "-j", "ACCEPT"],
-            capture_output=True)
+            ["iptables", "-D", "INPUT", "-i", network.host_device, "-d", network.router_ip, "-p", "tcp", "--dport",
+             "53", "-j", "ACCEPT"], check=False, capture_output=True)
+
+        # Disallow traffic to the router IP
+        subprocess.run(["iptables", "-D", "INPUT", "-d", network.router_ip, "-j", "DROP"], check=False,
+                       capture_output=True)
+
+        if network.accessible:
+            for network_connection in network.connections.values():
+                # Allow traffic from the user VPN IP to the client IP
+                subprocess.run(
+                    ["iptables", "-D", "FORWARD", "-i", "tun0", "-o", network.host_device, "-s", user_vpn_ip, "-d",
+                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
+                     "ACCEPT"], check=False, capture_output=True)
+                subprocess.run(
+                    ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", "tun0", "-d", user_vpn_ip, "-s",
+                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
+                     "ACCEPT"], check=False, capture_output=True)
+
+        if network.is_dmz:
+            # Allow traffic from the DMZ to the outside
+            subprocess.run(
+                ["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", "vmbr0", "-s", network.subnet, "!", "-d",
+                 CHALLENGES_ROOT_SUBNET_CIDR, "-j", "MASQUERADE"], check=False, capture_output=True)
+            subprocess.run(
+                ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", "vmbr0", "-s", network.subnet, "!",
+                 "-d", CHALLENGES_ROOT_SUBNET_CIDR, "-m","conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
+                 "ACCEPT"], check=False, capture_output=True)
+            subprocess.run(
+                ["iptables", "-D", "FORWARD", "-i", "vmbr0", "-o", network.host_device, "-d", network.subnet, "!",
+                 "-s", CHALLENGES_ROOT_SUBNET_CIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j",
+                 "ACCEPT"], check=False, capture_output=True)
 
 
 def stop_dnsmasq_instances(challenge):
@@ -267,6 +374,17 @@ def stop_dnsmasq_instances(challenge):
         if os.path.exists(log_path):
             os.remove(log_path)
 
+def remove_challenge_from_wazuh(challenge):
+    """
+    Remove challenge from wazuh manager.
+    """
+
+    for machine in challenge.machines.values():
+        try:
+            delete_wazuh_agent(machine.id)
+            pass
+        except requests.RequestException:
+            pass
 
 def remove_database_entries(challenge, user_id, db_conn):
     """

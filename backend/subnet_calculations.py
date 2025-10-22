@@ -2,6 +2,13 @@ def nth_subnet(subnet: str, n: int, start_subnet_mask, end_subnet_mask) -> str:
     """
     Calculate the nth subnet of a given subnet.
     """
+
+    if "/" in subnet:
+        if int(subnet.split("/")[1]) != start_subnet_mask:
+            raise ValueError(f"Ambiguous subnet mask: {subnet}. Expected {start_subnet_mask} but found {subnet.split('/')[1]}")
+
+        subnet = subnet.split("/")[0]
+
     def ip_to_binary(ip: str) -> str:
         """Convert an IP address to binary."""
         return ''.join(format(int(octet), '08b') for octet in ip.split('.'))

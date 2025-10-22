@@ -1,68 +1,66 @@
 import random
 import subprocess
+
 from subnet_calculations import nth_network_subnet
 from DatabaseClasses import *
 from proxmox_api_calls import *
 import os
-from stop_challenge import delete_iptables_rules, remove_database_entries, stop_dnsmasq_instances
+import shlex
+from stop_challenge import delete_iptables_rules, remove_database_entries, stop_dnsmasq_instances,remove_challenge_from_wazuh
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+import time
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
+CHALLENGES_ROOT_SUBNET = os.getenv("CHALLENGES_ROOT_SUBNET", "10.128.0.0")
+CHALLENGES_ROOT_SUBNET_MASK = os.getenv("CHALLENGES_ROOT_SUBNET_MASK", "255.128.0.0")
+CHALLENGES_ROOT_SUBNET_MASK_INT = sum(bin(int(x)).count('1') for x in CHALLENGES_ROOT_SUBNET_MASK.split('.'))
+CHALLENGES_ROOT_SUBNET_CIDR = f"{CHALLENGES_ROOT_SUBNET}/{CHALLENGES_ROOT_SUBNET_MASK_INT}"
+WAZUH_ENROLLMENT_PASSWORD = os.getenv("WAZUH_ENROLLMENT_PASSWORD")
 
 DNSMASQ_INSTANCES_DIR = "/etc/dnsmasq-instances/"
 os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 
 
-@retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1))
-def launch_challenge(challenge_template_id, user_id, db_conn):
+@retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
+       reraise=True)
+def launch_challenge(challenge_template_id, user_id, db_conn, ip_pool, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
     with db_conn:
         try:
             user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
-
             challenge_template = ChallengeTemplate(challenge_template_id)
-
             fetch_machines(challenge_template, db_conn)
-
             fetch_network_and_connection_templates(challenge_template, db_conn)
-
             fetch_domain_templates(challenge_template, db_conn)
-
         except Exception as e:
             raise ValueError(f"Error fetching from database: {e}")
 
         try:
-            challenge_subnet = fetch_challenge_subnet(db_conn)
-
-        except Exception as e:
-            raise ValueError(f"Error fetching challenge subnet: {e}")
-
-        try:
-            challenge = create_challenge(challenge_template, challenge_subnet, db_conn)
-
+            challenge = create_challenge(challenge_template, db_conn)
         except Exception as e:
             raise ValueError(f"Error creating challenge: {e}")
 
         try:
             clone_machines(challenge_template, challenge, db_conn)
-
+            attach_vrtmon_network(challenge)
             create_networks_and_connections(challenge_template, challenge, user_id, db_conn)
-
             create_domains(challenge_template, challenge, db_conn)
-
             create_network_devices(challenge)
-
             wait_for_networks_to_be_up(challenge)
 
-            add_iptables_rules(challenge, user_vpn_ip)
-
+            # Attach final networks and start VMs
             attach_networks_to_vms(challenge)
-
             start_dnsmasq_instances(challenge, user_vpn_ip)
-
             launch_machines(challenge)
 
+            configure_wazuh_for_challenge(challenge)
+
             add_running_challenge_to_user(challenge, user_id, db_conn)
+            add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
 
         except Exception as e:
             undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn)
@@ -143,58 +141,20 @@ def fetch_domain_templates(challenge_template, db_conn):
                 machine_template.add_domain_template(domain_template)
 
 
-def fetch_challenge_subnet(db_conn):
-    """
-    Fetch the challenge subnet.
-    """
-
-    with db_conn.cursor() as cursor:
-        cursor.execute("""
-            UPDATE challenge_subnets
-            SET available = FALSE
-            WHERE subnet = (
-                SELECT subnet
-                FROM challenge_subnets
-                WHERE available = TRUE
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING subnet
-        """)
-        result = cursor.fetchone()
-
-        if result is None:
-            raise ValueError("No available challenge subnet found")
-
-        challenge_subnet = result[0]
-        challenge_subnet = ChallengeSubnet(subnet=challenge_subnet)
-
-        return challenge_subnet
-
-
-def create_challenge(challenge_template, challenge_subnet, db_conn):
+def create_challenge(challenge_template, db_conn):
     """
     Create a challenge for the given user ID and challenge template.
     """
 
     with db_conn.cursor() as cursor:
         cursor.execute("""
-        INSERT INTO challenges (id, challenge_template_id, subnet)
-        VALUES (
-            (
-                SELECT COALESCE(MIN(id), 0) + 1 
-                FROM challenges c
-                WHERE NOT EXISTS(
-                    SELECT 1 FROM challenges WHERE id = c.id + 1
-                )
-                OR c.id = 0                
-            ),
-            %s, %s
-        )
-        RETURNING id
-        """, (challenge_template.id, challenge_subnet.subnet))
+        INSERT INTO challenges (challenge_template_id)
+        VALUES (%s)
+        RETURNING id, subnet
+        """, (challenge_template.id,))
 
-        challenge_id = cursor.fetchone()[0]
+        challenge_id, challenge_subnet_value = cursor.fetchone()
+        challenge_subnet = ChallengeSubnet(challenge_subnet_value)
         challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=challenge_subnet.subnet)
 
     return challenge
@@ -229,25 +189,141 @@ def clone_machines(challenge_template, challenge, db_conn):
         clone_vm_api_call(machine_template, machine)
 
 
-def generate_mac_address(challenge_id, local_network_id, local_connection_id):
+def attach_vrtmon_network(challenge):
+    """
+    Attach the vrtmon management network (net31) to all VMs.
+    This network is used for monitoring and Wazuh communication.
+    """
+    for machine in challenge.machines.values():
+        add_network_device_api_call(
+            machine.id,
+            nic="net31",
+            bridge="vrtmon",
+            model="e1000",
+            mac_index="0A:01"
+        )
+
+
+def vmid_to_ipv6(vmid, offset=0x1000):
+    """
+    Create ipv6 address from a VMID.
+    """
+    host_id = offset + vmid
+    high = (host_id >> 16) & 0xFFFF
+    low  = host_id & 0xFFFF
+    return f"fd12:3456:789a:1::{high:x}:{low:x}"
+
+
+def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101"):
+    """
+    Configure Wazuh for all machines in a challenge via QEMU Guest Agent
+    """
+    # Wait for all VMs to boot and qemu-ga to be ready
+    for machine in challenge.machines.values():
+        wait_for_qemu_guest_agent(machine)
+
+    # Configure Wazuh on all machines
+    for machine in challenge.machines.values():
+        try:
+            configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip)
+        except Exception as e:
+            print(f"[Error] Failed to configure Wazuh for VM {machine.id}: {e}", flush=True)
+            raise
+
+
+def wait_for_qemu_guest_agent(machine, timeout=120):
+    """
+    Wait until QEMU Guest Agent is ready
+    """
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        try:
+            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            pass
+
+        time.sleep(5)
+
+    raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
+
+
+def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a:1::101"):
+    """
+    Configure IPv6 on vrtmon interface and Wazuh agent via QEMU Guest Agent
+    """
+    ipv6 = vmid_to_ipv6(machine.id)
+    vrtmon_gw = "fd12:3456:789a:1::1"
+    agent_name = f"Agent_{machine.id}"
+
+    # Step 1: Configure IPv6
+    cmd = f"""iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
+    ip -6 addr add {ipv6}/64 dev $iface && \
+    ip -6 route add default via {vrtmon_gw}"""
+
+    subprocess.run(f"qm guest exec {machine.id} -- bash -c '{cmd}'", shell=True, capture_output=True, text=True)
+
+    # Step 2: Stop Wazuh agent if running
+    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "stop", "wazuh-agent"]
+    subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # Ignore errors
+
+    # Step 3: Register agent with manager
+    cmd = [
+        "qm", "guest", "exec", str(machine.id), "--",
+        "/var/monitoring/wazuh-agent/setup_wazuh.sh",
+        "--register",
+        f"--manager={manager_ip}",
+        f"--name={agent_name}",
+        f"--password={WAZUH_ENROLLMENT_PASSWORD}",
+        "--yes"
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
+
+    # Step 4: Start Wazuh agent
+    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "daemon-reload"]
+    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "enable", "wazuh-agent"]
+    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "start", "wazuh-agent"]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
+
+    # Step 5: Clean up monitoring directory
+    cmd = ["qm", "guest", "exec", str(machine.id), "--", "rm", "-rf", "/var/monitoring"]
+    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+
+def generate_mac_address(machine_id, local_network_id, local_connection_id):
     """
     Generate a MAC address based on the machine ID, network ID, and connection ID.
-    network_id, connection_id : 1-15 -> 2 nibbles combined
-    challenge_id : 100000000 -> 899999999 -> 8 nibbles -> hash to
+    local_network_id, local_connection_id : 1-15 -> 2 nibbles combined
+    machine_id : 100000000 -> 899999999 -> 8 nibbles -> hash to
     """
-    challenge_hex = hex(challenge_id)[2:].zfill(8)[-8:]
-    challenge_bytes = [challenge_hex[i:i + 2] for i in range(0, len(challenge_hex), 2)]
+    machine_hex = hex(machine_id)[2:].zfill(8)[-8:]
+    machine_bytes = [machine_hex[i:i + 2] for i in range(0, len(machine_hex), 2)]
     network_hex = hex(local_network_id)[2:]
     connection_hex = hex(local_connection_id)[2:]
 
-    if len(challenge_bytes) != 4:
-        raise ValueError(f"Challenge ID must be 8 hex digits, got {len(challenge_bytes) * 2} hex digits")
+    if len(machine_bytes) != 4:
+        raise ValueError(f"Challenge ID must be 8 hex digits, got {len(machine_bytes) * 2} hex digits")
 
     if len(network_hex) > 1 or len(connection_hex) > 1:
         raise ValueError(f"Network ID and Connection ID must be 1 hex digit, got {len(network_hex)} and "
                          f"{len(connection_hex)} hex digits")
 
-    mac = (f"02:{challenge_bytes[0]}:{challenge_bytes[1]}:{challenge_bytes[2]}:{challenge_bytes[3]}"
+    mac = (f"02:{machine_bytes[0]}:{machine_bytes[1]}:{machine_bytes[2]}:{machine_bytes[3]}"
            f":{network_hex}{connection_hex}")
     return mac
 
@@ -280,19 +356,9 @@ def create_networks_and_connections(challenge_template, challenge, user_id, db_c
 
         with db_conn.cursor() as cursor:
             cursor.execute("""
-            INSERT INTO networks (id, network_template_id, subnet, host_device)
-            VALUES (
-                (
-                    SELECT COALESCE(MIN(id), 0) + 1 
-                    FROM networks n
-                    WHERE NOT EXISTS(
-                        SELECT 1 FROM networks WHERE id = n.id + 1
-                    )
-                    OR n.id = 0                
-                ),
-                %s, %s, %s
-            )
-            RETURNING id""", (network_template.id, network_subnet, network_host_device))
+            INSERT INTO networks (network_template_id, subnet, host_device, challenge_id)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id""", (network_template.id, network_subnet, network_host_device, challenge.id))
 
             network_id = cursor.fetchone()[0]
             network = Network(
@@ -306,11 +372,11 @@ def create_networks_and_connections(challenge_template, challenge, user_id, db_c
             challenge.add_network(network)
 
         for local_connection_id, machine_template in enumerate(network_template.connected_machines.values()):
-            client_mac = generate_mac_address(challenge.id, local_network_id, local_connection_id)
+            machine = machine_template.child
+
+            client_mac = generate_mac_address(machine.id, local_network_id, local_connection_id)
             client_ip = random.choice(list(available_client_ips))
             available_client_ips.remove(client_ip)
-
-            machine = machine_template.child
 
             if machine is None:
                 raise ValueError("Machine ID not found")
@@ -372,7 +438,7 @@ def fetch_user_vpn_ip(user_id, db_conn):
     return user_vpn_ip
 
 
-def add_iptables_rules(challenge, user_vpn_ip):
+def add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device):
     """
     Update iptables rules for the given user VPN IP.
     """
@@ -391,8 +457,23 @@ def add_iptables_rules(challenge, user_vpn_ip):
              "53", "-j", "ACCEPT"], check=True)
 
         # Disallow traffic to the router IP
-        subprocess.run(["iptables", "-A", "INPUT", "-i", network.host_device, "-d", network.router_ip, "-j", "DROP"],
-                       check=True)
+        subprocess.run(["iptables", "-A", "INPUT", "-d", network.router_ip, "-j", "DROP"], check=True)
+
+        # Set up qdisc
+        subprocess.run(["tc", "qdisc", "add", "dev", network.host_device, "clsact"], check=False)
+
+        # Mirror traffic on this network to monitoring_device
+        subprocess.run([
+            "tc", "filter", "add", "dev", network.host_device, "ingress", "protocol", "ip",
+            "matchall",  # ADD THIS
+            "action", "mirred", "egress", "mirror", "dev", vpn_monitoring_device
+        ], check=True)
+
+        subprocess.run([
+            "tc", "filter", "add", "dev", network.host_device, "egress", "protocol", "ip",
+            "matchall",  # ADD THIS
+            "action", "mirred", "egress", "mirror", "dev", vpn_monitoring_device
+        ], check=True)
 
         if network.accessible:
             for network_connection in network.connections.values():
@@ -406,24 +487,39 @@ def add_iptables_rules(challenge, user_vpn_ip):
                      network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
                      "ACCEPT"], check=True)
 
-            # Disallow traffic to the router IP
-            subprocess.run(["iptables", "-A", "INPUT", "-i", "tun0", "-d", network.router_ip, "-j", "DROP"],
-                           check=True)
-
         if network.is_dmz:
             # Allow traffic from the DMZ to the outside
             subprocess.run(
-                ["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", network.subnet, "-o", "vmbr0", "-j", "MASQUERADE"],
-                check=True)
+                ["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "vmbr0", "-s", network.subnet, "!", "-d",
+                 CHALLENGES_ROOT_SUBNET_CIDR, "-j", "MASQUERADE"], check=True)
             subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", network.host_device, "-o", "vmbr0", "-s", network.subnet, "-m",
-                 "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j", "ACCEPT"], check=True)
+                ["iptables", "-A", "FORWARD", "-i", network.host_device, "-o", "vmbr0", "-s", network.subnet, "!",
+                 "-d", CHALLENGES_ROOT_SUBNET_CIDR, "-m","conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
+                 "ACCEPT"], check=True)
             subprocess.run(
-                ["iptables", "-A", "FORWARD", "-i", "vmbr0", "-o", network.host_device, "-d", network.subnet, "-m",
-                 "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"], check=True)
+                ["iptables", "-A", "FORWARD", "-i", "vmbr0", "-o", network.host_device, "-d", network.subnet, "!",
+                 "-s", CHALLENGES_ROOT_SUBNET_CIDR, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j",
+                 "ACCEPT"], check=True)
+
+            # Set up qdisc for DMZ monitoring
+            subprocess.run(["tc", "qdisc", "add", "dev", "vmbr0", "clsact"], check=False)
+
+            # Mirror DMZ traffic (internet-bound only)
+            subprocess.run([
+                "tc", "filter", "add", "dev", network.host_device, "egress",
+                "protocol", "ip", "flower",
+                "src_ip", network.subnet,
+                "action", "mirred", "egress", "mirror", "dev", dmz_monitoring_device
+            ], check=True)
+            subprocess.run([
+                "tc", "filter", "add", "dev", "vmbr0", "ingress",
+                "protocol", "ip", "flower",
+                "dst_ip", network.subnet,
+                "action", "mirred", "egress", "mirror", "dev", dmz_monitoring_device
+            ], check=True)
 
 
-def wait_for_networks_to_be_up(challenge):
+def wait_for_networks_to_be_up(challenge, try_timeout=3, max_tries=10):
     """
     Wait for networks to be up.
     """
@@ -431,12 +527,24 @@ def wait_for_networks_to_be_up(challenge):
     host_devices = [network.host_device for network in challenge.networks.values()]
     all_devices_up = False
 
-    while not all_devices_up:
-        all_devices_up = True
-        for device in host_devices:
-            if not os.path.exists(f"/sys/class/net/{device}"):
-                all_devices_up = False
-                break
+    tries = 0
+
+    while not all_devices_up and tries < max_tries:
+        tries += 1
+        try_start = time.time()
+
+        while time.time() - try_start < try_timeout and not all_devices_up:
+            all_devices_up = True
+            for device in host_devices:
+                if not os.path.exists(f"/sys/class/net/{device}"):
+                    all_devices_up = False
+
+        if not all_devices_up:
+            reload_network_api_call()
+
+    if not all_devices_up:
+        raise TimeoutError("Timed out waiting for networks to be up")
+
 
 
 def start_dnsmasq_instances(challenge, user_vpn_ip):
@@ -551,6 +659,7 @@ def undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn):
     delete_iptables_rules(challenge, user_vpn_ip)
     stop_dnsmasq_instances(challenge)
     remove_database_entries(challenge, user_id, db_conn)
+    remove_challenge_from_wazuh(challenge)
 
 
 def stop_and_delete_machines(challenge):

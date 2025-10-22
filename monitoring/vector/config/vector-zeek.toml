@@ -1,0 +1,407 @@
+[sources.zeek_logs]
+type = "file"
+include = ["/opt/zeek/logs/current/*.log"]
+ignore_older_secs = 0
+read_from = "end"
+fingerprint.strategy = "device_and_inode"
+max_line_bytes = 1048576
+
+[transforms.parse_zeek]
+type = "remap"
+inputs = ["zeek_logs"]
+source = '''
+# Parse the JSON line
+. = parse_json!(.message)
+
+# Store raw JSON FIRST
+.raw = encode_json(.)
+
+# Determine log type from file path or _log field in JSON
+log_type = "unknown"
+
+# Try to get log type from the JSON itself (Zeek sometimes includes _path field)
+if exists(._path) {
+    log_type = to_string(._path) ?? "unknown"
+} else if exists(.file) {
+    file_path = to_string(.file) ?? ""
+
+    if contains(file_path, "conn.log") {
+        log_type = "conn"
+    } else if contains(file_path, "dns.log") {
+        log_type = "dns"
+    } else if contains(file_path, "http.log") {
+        log_type = "http"
+    } else if contains(file_path, "ssl.log") {
+        log_type = "ssl"
+    } else if contains(file_path, "files.log") {
+        log_type = "files"
+    } else if contains(file_path, "weird.log") {
+        log_type = "weird"
+    } else if contains(file_path, "stats.log") {
+        log_type = "stats"
+    }
+} else {
+    # Fallback: detect from content
+    if exists(.conn_state) {
+        log_type = "conn"
+    } else if exists(.query) {
+        log_type = "dns"
+    } else if exists(.method) {
+        log_type = "http"
+    } else if exists(.version) && exists(.cipher) {
+        log_type = "ssl"
+    } else if exists(.notice) {
+        # Zeek notice records (e.g., possible_split_routing)
+        log_type = "notice"
+    } else if exists(.name) && exists(.metric_type) {
+        # Check if this is a labeled metric (Prometheus-style)
+        if exists(.labels) && exists(.label_values) {
+            log_type = "metric_labeled"
+        } else {
+            log_type = "metric"
+        }
+    } else if exists(.peer) && (exists(.mem) || exists(.pkts_proc) || exists(.active_tcp_conns)) {
+        # Zeek stats.log - runtime statistics
+        log_type = "stats"
+    }
+}
+
+.event_type = log_type
+
+# Convert Zeek timestamp to Unix microseconds
+if exists(.ts) {
+    ts_float = to_float(.ts) ?? 0.0
+    .ts = to_int(ts_float * 1000000)
+} else {
+    .ts = to_unix_timestamp(now(), unit: "microseconds")
+}
+
+# Ingestion timestamp
+.ingested_at = to_unix_timestamp(now(), unit: "microseconds")
+
+# === COMMON FIELDS (all log types) ===
+.uid = to_string(.uid) ?? ""
+
+# Network 5-tuple (create only when present)
+if exists(."id.orig_h") {
+    orig_h = to_string(."id.orig_h") ?? "0.0.0.0"
+    .id_orig_h = "::ffff:" + orig_h
+}
+
+if exists(."id.orig_p") {
+    .id_orig_p = to_int(."id.orig_p") ?? 0
+}
+
+if exists(."id.resp_h") {
+    resp_h = to_string(."id.resp_h") ?? "0.0.0.0"
+    .id_resp_h = "::ffff:" + resp_h
+}
+
+if exists(."id.resp_p") {
+    .id_resp_p = to_int(."id.resp_p") ?? 0
+}
+
+.proto = to_string(.proto) ?? ""
+
+# === NOTICE (Zeek notice logs) ===
+if log_type == "notice" {
+    .zeek_notice_name  = to_string(.name) ?? ""
+    .zeek_notice_flag  = to_bool(.notice) ?? false
+    .zeek_notice_peer  = to_string(.peer) ?? ""
+    .zeek_notice_uid   = to_string(.uid)
+    .zeek_notice_msg   = to_string(.msg) ?? ""
+    .zeek_notice_sub   = to_string(.sub) ?? ""
+    .zeek_notice_note  = to_string(.note) ?? ""
+
+    # Remove originals to avoid duplication
+    del(.name)
+    del(.notice)
+    del(.peer)
+    del(.uid)
+    del(.msg)
+    del(.sub)
+    del(.note)
+}
+
+# === METRIC / STATS (regular metrics) ===
+if log_type == "metric" {
+    .metric_name = to_string(.name) ?? ""
+    .metric_type = to_string(.metric_type) ?? ""
+    .metric_peer = to_string(.peer) ?? ""
+    .metric_value = to_float(.value) ?? 0.0
+
+    # Remove originals to avoid collisions
+    del(.name)
+    del(.value)
+    del(.peer)
+    del(.metric_type)
+}
+
+# === METRIC_LABELED (Prometheus-style metrics with labels) ===
+if log_type == "metric_labeled" {
+    .metric_name = to_string(.name) ?? ""
+    .metric_type = to_string(.metric_type) ?? ""
+    .metric_peer = to_string(.peer) ?? ""
+    .metric_value = to_float(.value) ?? 0.0
+
+    # Store labels as JSON arrays (ClickHouse can handle these)
+    if exists(.labels) {
+        .metric_labels = .labels
+    }
+    if exists(.label_values) {
+        .metric_label_values = .label_values
+    }
+
+    # Remove originals
+    del(.name)
+    del(.value)
+    del(.peer)
+    del(.metric_type)
+    del(.labels)
+    del(.label_values)
+}
+
+# === STATS (Zeek runtime statistics) ===
+if log_type == "stats" {
+    .stats_peer = to_string(.peer) ?? ""
+    .stats_mem = to_int(.mem) ?? 0
+    .stats_pkts_proc = to_int(.pkts_proc) ?? 0
+    .stats_pkts_dropped = to_int(.pkts_dropped) ?? 0
+    .stats_pkts_link = to_int(.pkts_link) ?? 0
+    .stats_bytes_recv = to_int(.bytes_recv) ?? 0
+    .stats_active_tcp_conns = to_int(.active_tcp_conns) ?? 0
+    .stats_active_udp_conns = to_int(.active_udp_conns) ?? 0
+    .stats_active_icmp_conns = to_int(.active_icmp_conns) ?? 0
+    .stats_tcp_conns = to_int(.tcp_conns) ?? 0
+    .stats_udp_conns = to_int(.udp_conns) ?? 0
+    .stats_icmp_conns = to_int(.icmp_conns) ?? 0
+    .stats_timers = to_int(.timers) ?? 0
+    .stats_active_timers = to_int(.active_timers) ?? 0
+    .stats_events_proc = to_int(.events_proc) ?? 0
+    .stats_events_queued = to_int(.events_queued) ?? 0
+    .stats_active_files = to_int(.active_files) ?? 0
+    .stats_files = to_int(.files) ?? 0
+    .stats_active_dns_requests = to_int(.active_dns_requests) ?? 0
+    .stats_dns_requests = to_int(.dns_requests) ?? 0
+
+    # Reassembly statistics
+    .stats_reassem_tcp_size = to_int(.reassem_tcp_size) ?? 0
+    .stats_reassem_file_size = to_int(.reassem_file_size) ?? 0
+    .stats_reassem_frag_size = to_int(.reassem_frag_size) ?? 0
+    .stats_reassem_unknown_size = to_int(.reassem_unknown_size) ?? 0
+
+    # Packet lag
+    .stats_pkt_lag = to_float(.pkt_lag) ?? 0.0
+
+    # Clean up originals
+    del(.peer)
+    del(.mem)
+    del(.pkts_proc)
+    del(.pkts_dropped)
+    del(.pkts_link)
+    del(.bytes_recv)
+    del(.active_tcp_conns)
+    del(.active_udp_conns)
+    del(.active_icmp_conns)
+    del(.tcp_conns)
+    del(.udp_conns)
+    del(.icmp_conns)
+    del(.timers)
+    del(.active_timers)
+    del(.events_proc)
+    del(.events_queued)
+    del(.active_files)
+    del(.files)
+    del(.active_dns_requests)
+    del(.dns_requests)
+    del(.reassem_tcp_size)
+    del(.reassem_file_size)
+    del(.reassem_frag_size)
+    del(.reassem_unknown_size)
+    del(.pkt_lag)
+}
+
+# === CONN.LOG SPECIFIC FIELDS ===
+if log_type == "conn" {
+    .service = to_string(.service) ?? ""
+    .duration = to_float(.duration) ?? 0.0
+
+    .orig_bytes = to_int(.orig_bytes) ?? 0
+    .resp_bytes = to_int(.resp_bytes) ?? 0
+    .orig_pkts = to_int(.orig_pkts) ?? 0
+    .resp_pkts = to_int(.resp_pkts) ?? 0
+    .orig_ip_bytes = to_int(.orig_ip_bytes) ?? 0
+    .resp_ip_bytes = to_int(.resp_ip_bytes) ?? 0
+
+    .conn_state = to_string(.conn_state) ?? ""
+    .history = to_string(.history) ?? ""
+
+    .local_orig = to_bool(.local_orig) ?? false
+    .local_resp = to_bool(.local_resp) ?? false
+
+    .missed_bytes = to_int(.missed_bytes) ?? 0
+
+    .community_id = to_string(.community_id) ?? ""
+}
+
+# === DNS.LOG SPECIFIC FIELDS ===
+if log_type == "dns" {
+    .dns_query = to_string(.query) ?? ""
+    .dns_qtype = to_string(.qtype) ?? ""
+    .dns_qtype_name = to_string(.qtype_name) ?? ""
+    .dns_rcode = to_string(.rcode) ?? ""
+    .dns_rcode_name = to_string(.rcode_name) ?? ""
+
+    .dns_AA = to_bool(.AA) ?? false
+    .dns_TC = to_bool(.TC) ?? false
+    .dns_RD = to_bool(.RD) ?? false
+    .dns_RA = to_bool(.RA) ?? false
+
+    # Handle arrays carefully
+    if exists(.answers) {
+        .dns_answers = .answers
+    } else {
+        .dns_answers = []
+    }
+
+    if exists(.TTLs) {
+        ttls = .TTLs
+
+        if is_array(ttls) {
+            # Konvertiere Array-Elemente zu Integers
+            result = []
+            for_each(array!(ttls)) -> |_index, value| {
+                result = push(result, to_int(value) ?? 0)
+            }
+            .dns_TTLs = result
+        } else {
+            # Einzelwert als Array
+            .dns_TTLs = [to_int(ttls) ?? 0]
+        }
+    } else {
+        .dns_TTLs = []
+    }
+
+    # Clean up original fields
+    del(.query)
+    del(.qtype)
+    del(.qtype_name)
+    del(.qclass)
+    del(.qclass_name)
+    del(.rcode)
+    del(.rcode_name)
+    del(.AA)
+    del(.TC)
+    del(.RD)
+    del(.RA)
+    del(.Z)
+    del(.answers)
+    del(.TTLs)
+    del(.trans_id)
+    del(.rtt)
+    del(.rejected)
+}
+
+# === HTTP.LOG SPECIFIC FIELDS ===
+if log_type == "http" {
+    .http_method = to_string(.method) ?? ""
+    .http_host = to_string(.host) ?? ""
+    .http_uri = to_string(.uri) ?? ""
+    .http_referrer = to_string(.referrer) ?? ""
+    .http_user_agent = to_string(.user_agent) ?? ""
+
+    .http_status_code = to_int(.status_code) ?? 0
+    .http_status_msg = to_string(.status_msg) ?? ""
+
+    .http_request_body_len = to_int(.request_body_len) ?? 0
+    .http_response_body_len = to_int(.response_body_len) ?? 0
+
+    # Clean up original fields
+    del(.method)
+    del(.host)
+    del(.uri)
+    del(.referrer)
+    del(.user_agent)
+    del(.status_code)
+    del(.status_msg)
+    del(.request_body_len)
+    del(.response_body_len)
+}
+
+# === SSL.LOG SPECIFIC FIELDS ===
+if log_type == "ssl" {
+    .ssl_version = to_string(.version) ?? ""
+    .ssl_cipher = to_string(.cipher) ?? ""
+    .ssl_server_name = to_string(.server_name) ?? ""
+    .ssl_subject = to_string(.subject) ?? ""
+    .ssl_issuer = to_string(.issuer) ?? ""
+    .ssl_validation_status = to_string(.validation_status) ?? ""
+
+    # Clean up original fields
+    del(.version)
+    del(.cipher)
+    del(.server_name)
+    del(.subject)
+    del(.issuer)
+    del(.validation_status)
+}
+
+# === FILES.LOG SPECIFIC FIELDS ===
+if log_type == "files" {
+    .file_fuid = to_string(.fuid) ?? ""
+    .file_mime_type = to_string(.mime_type) ?? ""
+    .file_filename = to_string(.filename) ?? ""
+    .file_total_bytes = to_int(.total_bytes) ?? 0
+
+    .file_md5 = to_string(.md5) ?? ""
+    .file_sha1 = to_string(.sha1) ?? ""
+    .file_sha256 = to_string(.sha256) ?? ""
+}
+
+del(."id.orig_h")
+del(."id.orig_p")
+del(."id.resp_h")
+del(."id.resp_p")
+
+# Clean up other original fields that are now normalized
+del(.message)
+del(.file)
+if log_type != "conn" {
+    del(.service)
+}
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parse_zeek"]
+endpoint = "https://10.0.0.103:8443"
+database = "zeek"
+table = "logs"
+compression = "gzip"
+skip_unknown_fields = true
+date_time_best_effort = true
+
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "default"
+password = "SecretPassword"
+
+[sinks.clickhouse.tls]
+verify_certificate = true
+ca_file = "/root/ctf-challenger/setup/certs/fullchain.pem"
+
+[sinks.clickhouse.batch]
+max_events = 500
+max_bytes = 1048576
+timeout_secs = 30
+
+[sinks.clickhouse.buffer]
+max_events = 100000
+when_full = "block"
+
+[sinks.clickhouse.healthcheck]
+enabled = true
+uri = "https://10.0.0.103:8443/ping"
+
+[sinks.clickhouse.encoding]
+timestamp_format = "unix"

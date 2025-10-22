@@ -1,0 +1,169 @@
+# Source: Read Suricata EVE JSON logs
+[sources.suricata_eve]
+type = "file"
+include = ["/var/log/suricata/eve_vpn.json"]
+read_from = "end"
+fingerprint.strategy = "device_and_inode"
+ignore_older_secs = 0
+max_line_bytes = 1048576  # 1MB max line size for large payloads
+data_dir = "/var/lib/vector/suricata_vpn"
+
+# Transform: Parse JSON and add metadata
+[transforms.parse_eve]
+type = "remap"
+inputs = ["suricata_eve"]
+source = '''
+# Parse the JSON log line
+. = parse_json!(.message)
+
+# Add ingestion timestamp
+.ingested_at = now()
+.ingested_at = to_unix_timestamp(now(), unit: "microseconds")
+
+# Parse timestamp with timezone offset and convert to Unix microsecond format
+parsed_ts = parse_timestamp!(string!(.timestamp), format: "%Y-%m-%dT%H:%M:%S.%6f%z")
+.timestamp = to_unix_timestamp(parsed_ts, unit: "microseconds")
+
+# Handle event_type
+.event_type = string!(.event_type)
+
+# Extract and standardize network fields
+if exists(.src_ip) { .src_ip = to_string(.src_ip) ?? "" }
+if exists(.dest_ip) { .dest_ip = to_string(.dest_ip) ?? "" }
+if exists(.src_port) { .src_port = to_int(.src_port) ?? null }
+if exists(.dest_port) { .dest_port = to_int(.dest_port) ?? null }
+if exists(.proto) { .proto = to_string(.proto) ?? "" }
+
+# Handle flow_id as string to avoid integer overflow
+if exists(.flow_id) { .flow_id = to_string(.flow_id) ?? "" }
+
+# Ensure community_id is a string
+if exists(.community_id) { .community_id = to_string(.community_id) ?? "" }
+
+# Convert payload fields to proper encoding for ClickHouse
+if exists(.payload) && is_string(.payload) { .payload = encode_base64!(.payload) }
+if exists(.payload_printable) { .payload_printable = to_string(.payload_printable) ?? "" }
+
+# Extract alert fields
+if exists(.alert) {
+    .alert_signature = to_string(get!(.alert, ["signature"])) ?? ""
+    .alert_signature_id = to_int(.alert.signature_id) ?? 0
+    .alert_category = to_string(get!(.alert, ["category"])) ?? ""
+    .alert_severity = to_int(.alert.severity) ?? 0
+    .alert_action = to_string(get!(.alert, ["action"])) ?? ""
+}
+
+# Extract DNS fields
+if exists(.dns) {
+    .dns_type = to_string(get!(.dns, ["type"])) ?? ""
+    .dns_rrname = to_string(get!(.dns, ["rrname"])) ?? ""
+    .dns_rrtype = to_string(get!(.dns, ["rrtype"])) ?? ""
+    .dns_id = to_int(.dns.id) ?? 0
+}
+
+# Extract HTTP fields
+if exists(.http) {
+    .http_hostname = to_string(get!(.http, ["hostname"])) ?? ""
+    .http_url = to_string(get!(.http, ["url"])) ?? ""
+    .http_method = to_string(get!(.http, ["http_method"])) ?? ""
+    .http_status = to_int(.http.status) ?? 0
+    .http_user_agent = to_string(get!(.http, ["http_user_agent"])) ?? ""
+}
+
+# Extract TLS fields
+if exists(.tls) {
+    .tls_subject = to_string(get!(.tls, ["subject"])) ?? ""
+    .tls_issuer = to_string(get!(.tls, ["issuer"])) ?? ""
+    .tls_sni = to_string(get!(.tls, ["sni"])) ?? ""
+    .tls_version = to_string(get!(.tls, ["version"])) ?? ""
+    .tls_ja3_hash = to_string(get!(.tls, ["ja3", "hash"])) ?? ""
+    .tls_ja3s_hash = to_string(get!(.tls, ["ja3s", "hash"])) ?? ""
+}
+
+# Extract Flow fields
+if exists(.flow) {
+    .flow_pkts_toserver = to_int(.flow.pkts_toserver) ?? 0
+    .flow_pkts_toclient = to_int(.flow.pkts_toclient) ?? 0
+    .flow_bytes_toserver = to_int(.flow.bytes_toserver) ?? 0
+    .flow_bytes_toclient = to_int(.flow.bytes_toclient) ?? 0
+    .flow_start = to_string(get!(.flow, ["start"])) ?? ""
+    .flow_end = to_string(get!(.flow, ["end"])) ?? ""
+}
+
+# Handle nested objects - convert to JSON strings for ClickHouse storage
+if exists(.alert) { .alert_json = encode_json(.alert); del(.alert) }
+if exists(.http) { .http_json = encode_json(.http); del(.http) }
+if exists(.dns) { .dns_json = encode_json(.dns); del(.dns) }
+if exists(.tls) { .tls_json = encode_json(.tls); del(.tls) }
+if exists(.ssh) { .ssh_json = encode_json(.ssh); del(.ssh) }
+if exists(.flow) { .flow_json = encode_json(.flow); del(.flow) }
+if exists(.netflow) { .netflow_json = encode_json(.netflow); del(.netflow) }
+if exists(.files) { .files_json = encode_json(.files); del(.files) }
+if exists(.smtp) { .smtp_json = encode_json(.smtp); del(.smtp) }
+if exists(.ftp) { .ftp_json = encode_json(.ftp); del(.ftp) }
+if exists(.rdp) { .rdp_json = encode_json(.rdp); del(.rdp) }
+if exists(.nfs) { .nfs_json = encode_json(.nfs); del(.nfs) }
+if exists(.smb) { .smb_json = encode_json(.smb); del(.smb) }
+if exists(.tftp) { .tftp_json = encode_json(.tftp); del(.tftp) }
+if exists(.ike) { .ike_json = encode_json(.ike); del(.ike) }
+if exists(.dcerpc) { .dcerpc_json = encode_json(.dcerpc); del(.dcerpc) }
+if exists(.krb5) { .krb5_json = encode_json(.krb5); del(.krb5) }
+if exists(.snmp) { .snmp_json = encode_json(.snmp); del(.snmp) }
+if exists(.rfb) { .rfb_json = encode_json(.rfb); del(.rfb) }
+if exists(.sip) { .sip_json = encode_json(.sip); del(.sip) }
+if exists(.dhcp) { .dhcp_json = encode_json(.dhcp); del(.dhcp) }
+if exists(.mqtt) { .mqtt_json = encode_json(.mqtt); del(.mqtt) }
+if exists(.http2) { .http2_json = encode_json(.http2); del(.http2) }
+if exists(.stats) { .stats_json = encode_json(.stats); del(.stats) }
+if exists(.anomaly) { .anomaly_json = encode_json(.anomaly); del(.anomaly) }
+
+# Handle packet data if present
+if exists(.packet) && is_string(.packet) { .packet = encode_base64!(.packet) }
+
+# Handle additional fields
+if exists(.app_proto) { .app_proto = to_string(.app_proto) ?? "" }
+if exists(.in_iface) { .in_iface = to_string(.in_iface) ?? "" }
+if exists(.vlan) { .vlan = .vlan }
+
+# Remove the original message field
+del(.message)
+'''
+
+# Sink: Send all events to ClickHouse
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parse_eve"]
+endpoint = "https://10.0.0.103:8443"
+database = "suricata"
+table = "vpn_eve_logs"
+compression = "gzip"
+
+# Authentication
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "default"
+password = ""
+
+# Batch settings for performance
+[sinks.clickhouse.batch]
+max_events = 500
+max_bytes = 1048576
+timeout_secs = 30
+
+[sinks.clickhouse.tls]
+verify_certificate = true
+ca_file = "/root/ctf-challenger/setup/certs/fullchain.pem"
+
+# Corrected buffer configuration
+[sinks.clickhouse.buffer]
+max_events = 100000
+when_full = "block"
+
+# Health check
+[sinks.clickhouse.healthcheck]
+enabled = true
+uri = "https://10.0.0.103:8443/ping"
+
+# Encoding - Vector auto-detecting field types
+[sinks.clickhouse.encoding]
+timestamp_format = "unix"

@@ -50,7 +50,7 @@ class LoginHandler
         $this->initSession();
         $this->validateRequestMethod();
         $this->checkAlreadyAuthenticated();
-        $this->logger->logDebug("Initialized LoginHandler with Session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
+        $this->logger->logDebug("Initialized LoginHandler with Session ID: " . ($this->session->id() ? hash('sha256', $this->session->id()) : 'no-session'));
     }
 
     private function initSession(): void
@@ -220,7 +220,7 @@ class LoginHandler
     private function initializeUserSession(int $user_id, string $username): void
     {
         $this->session->regenerate_id(true);
-        $this->logger->logDebug("Session regenerated - User ID: {$user_id}, New Session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
+        $this->logger->logDebug("Session regenerated - User ID: {$user_id}, New Session ID: " . ($this->session->id() ? hash('sha256', $this->session->id()) : 'no-session'));
 
         $this->session['user_id'] = $user_id;
         $this->session['authenticated'] = true;

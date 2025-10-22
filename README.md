@@ -148,4 +148,7 @@ ROTATE_DAYS='90'
 LOGROTATE_CONFIG_DIR='/etc/logrotate.d'
 
 IPTABLES_FILE='/etc/iptables-backend/iptables.sh'
+
+LECTURE_SIGNUP_TOKEN='dummy-token'
 ```
+

@@ -16,6 +16,8 @@ load_dotenv()
 BACKEND_DIR = "/root/ctf-challenger/backend"
 sys.path.append(BACKEND_DIR)
 
+PlATFORM_URL = os.getenv("PlATFORM_URL", None)
+
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "10.0.0.1")
 PROXMOX_USER = os.getenv("PROXMOX_USER", "root@pam")
 PROXMOX_PASSWORD = os.getenv("PROXMOX_PASSWORD")
@@ -90,6 +92,8 @@ WAZUH_PORT = os.getenv("WAZUH_API_PORT", "55000")
 WAZUH_USER = os.getenv("WAZUH_API_USER", "wazuh-wui")
 WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 WAZUH_ENROLLMENT_PASSWORD = os.getenv("WAZUH_ENROLLMENT_PASSWORD", "")
+
+LECTURE_SIGNUP_TOKEN = os.getenv("LECTURE_SIGNUP_TOKEN", "dummy-token")
 
 
 REUSE_DOWNLOADED_OVA = True
@@ -367,6 +371,8 @@ def generate_and_distribute_env_files(backend_api_token, web_server_api_token):
         web_env_file.write(f"DB_USER='{WEBSERVER_DATABASE_USER}'\n")
         web_env_file.write(f"DB_PASSWORD='{WEBSERVER_DATABASE_PASSWORD}'\n")
         web_env_file.write(f"DB_PORT='{DATABASE_PORT}'\n")
+
+        web_env_file.write(f"LECTURE_SIGNUP_TOKEN='{LECTURE_SIGNUP_TOKEN}'\n")
 
 
     print("\tGenerating backend .env file")

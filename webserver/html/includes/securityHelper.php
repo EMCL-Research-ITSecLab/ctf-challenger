@@ -116,7 +116,7 @@ class SecurityHelper implements ISecurityHelper
             $this->session['csrf_token'] = $token;
             $this->session['csrf_token_time'] = $this->system->time();
 
-            $this->logger->logDebug("CSRF token generated for session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
+            $this->logger->logDebug("CSRF token generated for session ID: " . ($this->session->id() ? hash('sha256', $this->session->id()) : 'no-session'));
             return $token;
 
         } catch (CustomException $e) {

@@ -1,0 +1,36 @@
+{
+  "orgId": 1,
+  "name": "ClickHouse",
+  "type": "grafana-clickhouse-datasource",
+  "typeLogoUrl": "public/plugins/grafana-clickhouse-datasource/img/logo.svg",
+  "access": "proxy",
+  "url": "https://<clickhouse_ip>:<clickhouse_https_port>",
+  "user": "<clickhouse_user>",
+  "database": "",
+  "basicAuth": false,
+  "isDefault": false,
+  "jsonData": {
+    "addCorsHeader": false,
+    "defaultDatabase": "default",
+    "port": <clickhouse_native_port>,
+    "server": "<clickhouse_ip>",
+    "username": "default",
+    "tlsSkipVerify": true,
+    "tlsAuth": true,
+    "tlsAuthWithCACert": false,
+    "timeout": "30",
+    "protocol": "native"
+  },
+  "secureJsonData": {
+    "password": "<clickhouse_password>",
+    "tlsClientCert": "<fullchain_content>",
+    "tlsClientKey": "<privkey_content>"
+  },
+  "secureJsonFields": {
+    "password": true,
+    "tlsCACert": true,
+    "tlsClientCert": true,
+    "tlsClientKey": true
+  },
+  "readOnly": false
+}

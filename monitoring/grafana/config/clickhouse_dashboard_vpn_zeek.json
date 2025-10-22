@@ -1,0 +1,1521 @@
+{
+  "dashboard": {
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Total number of Zeek events over time including new event types",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(ts) as t,\n    count() as count\nFROM zeek.logs\nWHERE $__timeFilter(ts)\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Total Events Over Time",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Distribution of Zeek log types including notices and metrics",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    event_type,\n    count() as count\nFROM zeek.logs\nWHERE $__timeFilter(ts)\nGROUP BY event_type\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "Events by Type",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Zeek notices and alerts over time",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "id": 16,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(ts) as t,\n    count() as count\nFROM zeek.logs\nWHERE event_type = 'notice'\n  AND $__timeFilter(ts)\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Zeek Notices Over Time",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top Zeek notice types",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "id": 17,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    zeek_notice_name as notice_type,\n    zeek_notice_note as category,\n    count() as count,\n    uniq(IPv6NumToString(id_orig_h)) as unique_sources,\n    uniq(IPv6NumToString(id_resp_h)) as unique_destinations\nFROM zeek.logs\nWHERE event_type = 'notice'\n  AND $__timeFilter(ts)\n  AND zeek_notice_name != ''\nGROUP BY notice_type, category\nORDER BY count DESC\nLIMIT 15",
+            "refId": "A"
+          }
+        ],
+        "title": "Top Notice Types",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Connection states distribution (conn.log)",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "donut",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    conn_state,\n    count() as count\nFROM zeek.logs\nWHERE event_type = 'conn'\n  AND $__timeFilter(ts)\n  AND conn_state != ''\nGROUP BY conn_state\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "Connection States",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top services by connection count",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        },
+        "id": 4,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    service,\n    count() as count,\n    sum(orig_bytes + resp_bytes) as total_bytes,\n    avg(duration) as avg_duration\nFROM zeek.logs\nWHERE event_type = 'conn'\n  AND $__timeFilter(ts)\n  AND service != ''\nGROUP BY service\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top Services",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Zeek metrics and statistics over time",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        },
+        "id": 18,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(ts) as t,\n    sum(metric_value) as metric_value\nFROM zeek.logs\nWHERE event_type IN ('metric', 'stats')\n  AND $__timeFilter(ts)\n  AND metric_name = 'process_open_fds'\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Zeek Metrics - Open FDs",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Zeek performance statistics",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        },
+        "id": 19,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Value"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    metric_name,\n    metric_type,\n    avg(metric_value) as avg_value,\n    max(metric_value) as max_value,\n    min(metric_value) as min_value\nFROM zeek.logs\nWHERE event_type IN ('metric', 'stats')\n  AND $__timeFilter(ts)\n  AND metric_name != ''\nGROUP BY metric_name, metric_type\nORDER BY avg_value DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Zeek Performance Metrics",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Failed vs successful connections over time",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "normal"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 32
+        },
+        "id": 5,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(ts) as t,\n    countIf(conn_state IN ('S0', 'REJ', 'RSTO', 'RSTOS0')) as failed,\n    countIf(conn_state NOT IN ('S0', 'REJ', 'RSTO', 'RSTOS0')) as successful\nFROM zeek.logs\nWHERE event_type = 'conn'\n  AND $__timeFilter(ts)\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Connection Success vs Failures",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top DNS queries",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 40
+        },
+        "id": 6,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    dns_query as query,\n    dns_qtype_name as type,\n    count() as count,\n    uniq(IPv6NumToString(id_orig_h)) as unique_sources\nFROM zeek.logs\nWHERE event_type = 'dns'\n  AND $__timeFilter(ts)\n  AND dns_query != ''\nGROUP BY query, type\nORDER BY count DESC\nLIMIT 15",
+            "refId": "A"
+          }
+        ],
+        "title": "Top DNS Queries",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "DNS response codes distribution",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 40
+        },
+        "id": 7,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    dns_rcode_name as rcode,\n    count() as count\nFROM zeek.logs\nWHERE event_type = 'dns'\n  AND $__timeFilter(ts)\n  AND dns_rcode_name != ''\nGROUP BY rcode\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "DNS Response Codes",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top HTTP hosts by request volume",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 48
+        },
+        "id": 8,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    http_host as host,\n    count() as count,\n    sum(http_request_body_len + http_response_body_len) as total_bytes,\n    uniq(IPv6NumToString(id_orig_h)) as unique_clients\nFROM zeek.logs\nWHERE event_type = 'http'\n  AND $__timeFilter(ts)\n  AND http_host != ''\nGROUP BY host\nORDER BY count DESC\nLIMIT 15",
+            "refId": "A"
+          }
+        ],
+        "title": "Top HTTP Hosts",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "HTTP status code distribution",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 48
+        },
+        "id": 9,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    toString(http_status_code) as status,\n    count() as count\nFROM zeek.logs\nWHERE event_type = 'http'\n  AND $__timeFilter(ts)\n  AND http_status_code > 0\nGROUP BY status\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "HTTP Status Codes",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top SSL/TLS Server Names (SNI)",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 56
+        },
+        "id": 10,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    ssl_server_name as server_name,\n    ssl_version as version,\n    count() as count,\n    uniq(IPv6NumToString(id_orig_h)) as unique_clients\nFROM zeek.logs\nWHERE event_type = 'ssl'\n  AND $__timeFilter(ts)\n  AND ssl_server_name != ''\nGROUP BY server_name, version\nORDER BY count DESC\nLIMIT 15",
+            "refId": "A"
+          }
+        ],
+        "title": "Top TLS Server Names",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "SSL/TLS version distribution",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 56
+        },
+        "id": 11,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    ssl_version as version,\n    count() as count\nFROM zeek.logs\nWHERE event_type = 'ssl'\n  AND $__timeFilter(ts)\n  AND ssl_version != ''\nGROUP BY version\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "TLS Versions",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Network traffic volume over time",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Bytes",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "normal"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "bytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 64
+        },
+        "id": 12,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(ts) as t,\n    sum(orig_bytes) as outbound,\n    sum(resp_bytes) as inbound\nFROM zeek.logs\nWHERE event_type = 'conn'\n  AND $__timeFilter(ts)\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Network Traffic Volume",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Comprehensive log search with filtering by subnet, event type, and full-text search including new event types",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 14,
+          "w": 24,
+          "x": 0,
+          "y": 72
+        },
+        "id": 15,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Time"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 2,
+            "queryType": "logs",
+            "rawQuery": true,
+            "rawSql": "SELECT\n    ts as Time,\n    event_type,\n    IPv6NumToString(id_orig_h) as src_ip,\n    id_orig_p as src_port,\n    IPv6NumToString(id_resp_h) as dest_ip,\n    id_resp_p as dest_port,\n    proto,\n    \n    -- Connection fields\n    service,\n    conn_state,\n    duration,\n    orig_bytes,\n    resp_bytes,\n    total_bytes,\n    \n    -- DNS fields\n    dns_query,\n    dns_qtype_name,\n    dns_rcode_name,\n    arrayStringConcat(dns_answers, ', ') as dns_answers_joined,\n    \n    -- HTTP fields\n    http_method,\n    http_host,\n    http_uri,\n    http_status_code,\n    http_user_agent,\n    \n    -- SSL/TLS fields\n    ssl_version,\n    ssl_server_name,\n    ssl_subject,\n    ssl_cipher,\n    \n    -- File fields\n    file_mime_type,\n    file_filename,\n    file_total_bytes,\n    file_md5,\n    file_sha256,\n    \n    -- Notice fields\n    zeek_notice_name,\n    zeek_notice_note,\n    zeek_notice_msg,\n    zeek_notice_sub,\n    \n    -- Metric fields\n    metric_name,\n    metric_type,\n    metric_value,\n    \n    -- Connection metadata\n    uid,\n    community_id,\n    \n    -- Subnet classification\n    if(startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.'),\n       concat('10.128.', toString(toUInt8(splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[3])), '.0/24'),\n       'external') as src_subnet_class,\n    if(startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.'),\n       concat('10.128.', toString(toUInt8(splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[3])), '.0/24'),\n       'external') as dest_subnet_class,\n    \n    -- Traffic direction\n    multiIf(\n        startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.') AND startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.'), 'internal',\n        startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.'), 'outbound',\n        startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.'), 'inbound',\n        'external'\n    ) as traffic_direction,\n    \n    -- Raw JSON for detailed inspection\n    if(length(raw) > 200, concat(substring(raw, 1, 200), '...'), raw) as raw_preview\n\nFROM zeek.logs\nWHERE $__timeFilter(ts)\n  \n  -- Event type filter\n  AND (\n    ${event_type} = 'All' OR \n    event_type = ${event_type}\n  )\n  \n  -- Subnet filter (same logic as Suricata dashboard)\n  AND (\n       '$subnet_filter' = 'All' OR\n       ('$subnet_filter' = 'internal_any' AND (\n           startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.') OR \n           startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.')\n       )) OR\n       ('$subnet_filter' = 'internal_both' AND (\n           startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.') AND \n           startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.')\n       )) OR\n       ('$subnet_filter' = 'external_traffic' AND (\n           NOT startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.') OR \n           NOT startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.')\n       )) OR\n       (startsWith('$subnet_filter', '10.128.') AND (\n           startsWith(IPv6NumToString(id_orig_h), concat('::ffff:', '$subnet_filter')) OR\n           startsWith(IPv6NumToString(id_resp_h), concat('::ffff:', '$subnet_filter'))\n       ))\n  )\n  \n  -- Notice type filter\n  AND (\n       '$notice_type' = 'All' OR\n       event_type != 'notice' OR\n       zeek_notice_name = '$notice_type'\n  )\n  \n  -- Full-text search across relevant fields\n  AND (\n       '$search' = '' OR\n       uid ILIKE '%$search%' OR\n       community_id ILIKE '%$search%' OR\n       service ILIKE '%$search%' OR\n       dns_query ILIKE '%$search%' OR\n       http_host ILIKE '%$search%' OR\n       http_uri ILIKE '%$search%' OR\n       http_user_agent ILIKE '%$search%' OR\n       ssl_server_name ILIKE '%$search%' OR\n       ssl_subject ILIKE '%$search%' OR\n       file_filename ILIKE '%$search%' OR\n       file_md5 ILIKE '%$search%' OR\n       file_sha256 ILIKE '%$search%' OR\n       zeek_notice_name ILIKE '%$search%' OR\n       zeek_notice_msg ILIKE '%$search%' OR\n       metric_name ILIKE '%$search%' OR\n       IPv6NumToString(id_orig_h) ILIKE '%$search%' OR\n       IPv6NumToString(id_resp_h) ILIKE '%$search%' OR\n       raw ILIKE '%$search%'\n  )\n  \n  -- Connection state filter\n  AND (\n       '$conn_state_filter' = 'All' OR\n       event_type != 'conn' OR\n       conn_state = '$conn_state_filter'\n  )\n\nORDER BY ts DESC\nLIMIT $limit",
+            "refId": "A"
+          }
+        ],
+        "title": "Zeek Log Explorer",
+        "type": "table"
+      }
+    ],
+    "refresh": "30s",
+    "revision": 1,
+    "schemaVersion": 37,
+    "style": "dark",
+    "tags": ["zeek", "network", "security"],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "ClickHouse",
+            "value": "ClickHouse"
+          },
+          "description": "ClickHouse Data Source",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Data Source",
+          "multi": false,
+          "name": "DS_CLICKHOUSE",
+          "options": [],
+          "query": "grafana-clickhouse-datasource",
+          "queryValue": "",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "datasource"
+        },
+        {
+          "allValue": "'All'",
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "'All'"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT event_type FROM zeek.logs WHERE ts >= now() - INTERVAL 7 DAY ORDER BY event_type",
+          "description": "Filter by Zeek log type",
+          "hide": 0,
+          "includeAll": true,
+          "label": "Event Type",
+          "multi": true,
+          "name": "event_type",
+          "options": [],
+          "query": "SELECT DISTINCT event_type FROM zeek.logs WHERE ts >= now() - INTERVAL 7 DAY ORDER BY event_type",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "description": "Filter by subnet traffic pattern",
+          "hide": 0,
+          "allValue": "All",
+          "includeAll": true,
+          "label": "Subnet Filter",
+          "multi": false,
+          "name": "subnet_filter",
+          "options": [
+            {
+              "selected": true,
+              "text": "All Traffic",
+              "value": "All"
+            },
+            {
+              "selected": false,
+              "text": "Internal Traffic (Any 10.128.x)",
+              "value": "internal_any"
+            },
+            {
+              "selected": false,
+              "text": "Internal Only (Both 10.128.x)",
+              "value": "internal_both"
+            },
+            {
+              "selected": false,
+              "text": "External Traffic",
+              "value": "external_traffic"
+            }
+          ],
+          "query": "All,internal_any,internal_both,external_traffic",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "custom"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT subnet\nFROM\n(\n    SELECT\n        concat(\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[1], '.',\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[2], '.',\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[3], '.0/24'\n        ) AS subnet\n    FROM zeek.logs\n    WHERE startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.')\n      AND ts >= now() - INTERVAL 7 DAY\n\n    UNION ALL\n\n    SELECT\n        concat(\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[1], '.',\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[2], '.',\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[3], '.0/24'\n        ) AS subnet\n    FROM zeek.logs\n    WHERE startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.')\n      AND ts >= now() - INTERVAL 7 DAY\n)\nWHERE subnet LIKE '10.128.%'\nORDER BY subnet",
+          "description": "Specific /24 subnet filter",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Specific Subnet",
+          "multi": false,
+          "name": "specific_subnet",
+          "options": [],
+          "query": "SELECT DISTINCT subnet\nFROM\n(\n    SELECT\n        concat(\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[1], '.',\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[2], '.',\n            splitByChar('.', substring(IPv6NumToString(id_orig_h), 8))[3], '.0/24'\n        ) AS subnet\n    FROM zeek.logs\n    WHERE startsWith(IPv6NumToString(id_orig_h), '::ffff:10.128.')\n      AND ts >= now() - INTERVAL 7 DAY\n\n    UNION ALL\n\n    SELECT\n        concat(\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[1], '.',\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[2], '.',\n            splitByChar('.', substring(IPv6NumToString(id_resp_h), 8))[3], '.0/24'\n        ) AS subnet\n    FROM zeek.logs\n    WHERE startsWith(IPv6NumToString(id_resp_h), '::ffff:10.128.')\n      AND ts >= now() - INTERVAL 7 DAY\n)\nWHERE subnet LIKE '10.128.%'\nORDER BY subnet",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT zeek_notice_name FROM zeek.logs WHERE event_type = 'notice' AND zeek_notice_name != '' AND ts >= now() - INTERVAL 7 DAY ORDER BY zeek_notice_name",
+          "description": "Filter by Zeek notice type",
+          "hide": 0,
+          "allValue": "All",
+          "includeAll": true,
+          "label": "Notice Type",
+          "multi": false,
+          "name": "notice_type",
+          "options": [],
+          "query": "SELECT DISTINCT zeek_notice_name FROM zeek.logs WHERE event_type = 'notice' AND zeek_notice_name != '' AND ts >= now() - INTERVAL 7 DAY ORDER BY zeek_notice_name",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "",
+            "value": ""
+          },
+          "description": "Search across all fields including notices and metrics",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Search",
+          "multi": false,
+          "name": "search",
+          "options": [],
+          "query": "",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "textbox"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT conn_state FROM zeek.logs WHERE event_type = 'conn' AND conn_state != '' AND ts >= now() - INTERVAL 7 DAY ORDER BY conn_state",
+          "description": "Filter by connection state (conn.log)",
+          "hide": 0,
+          "includeAll": true,
+          "allValue": "All",
+          "label": "Conn State",
+          "multi": false,
+          "name": "conn_state_filter",
+          "options": [],
+          "query": "SELECT DISTINCT conn_state FROM zeek.logs WHERE event_type = 'conn' AND conn_state != '' AND ts >= now() - INTERVAL 7 DAY ORDER BY conn_state",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "1000",
+            "value": "1000"
+          },
+          "description": "Maximum number of results in Log Explorer",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Limit",
+          "multi": false,
+          "name": "limit",
+          "options": [
+            {
+              "selected": false,
+              "text": "100",
+              "value": "100"
+            },
+            {
+              "selected": false,
+              "text": "500",
+              "value": "500"
+            },
+            {
+              "selected": true,
+              "text": "1000",
+              "value": "1000"
+            },
+            {
+              "selected": false,
+              "text": "5000",
+              "value": "5000"
+            },
+            {
+              "selected": false,
+              "text": "10000",
+              "value": "10000"
+            }
+          ],
+          "query": "100,500,1000,5000,10000",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "custom"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Zeek Network Monitoring Dashboard",
+    "uid": "zeek-network-monitoring",
+    "version": 1,
+    "weekStart": ""
+  },
+  "folderUid": null,
+  "message": "Zeek Network Monitoring Dashboard",
+  "overwrite": true,
+  "inputs": [
+    {
+      "name": "DS_CLICKHOUSE",
+      "type": "datasource",
+      "pluginId": "grafana-clickhouse-datasource",
+      "value": "ClickHouse"
+    }
+  ]
+}

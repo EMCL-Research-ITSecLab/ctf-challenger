@@ -1,0 +1,31 @@
+{
+  "orgId": 1,
+  "name": "Wazuh-2",
+  "type": "elasticsearch",
+  "typeName": "Elasticsearch",
+  "typeLogoUrl": "public/app/plugins/datasource/elasticsearch/img/elasticsearch.svg",
+  "access": "proxy",
+  "url": "https://<wazuh_manager_ip>:9200",
+  "user": "<wazuh_user>",
+  "database": "",
+  "basicAuth": true,
+  "basicAuthUser": "<wazuh_user>",
+  "secureJsonData": {
+    "basicAuthPassword": "<wazuh_password>"
+  },
+  "isDefault": true,
+  "jsonData": {
+    "includeFrozen": false,
+    "logLevelField": "",
+    "logMessageField": "",
+    "maxConcurrentShardRequests": 5,
+    "oauthPassThru": false,
+    "serverName": "",
+    "sigV4Auth": false,
+    "timeField": "@timestamp",
+    "tlsAuth": false,
+    "tlsAuthWithCACert": false,
+    "tlsSkipVerify": true
+  },
+  "readOnly": false
+}

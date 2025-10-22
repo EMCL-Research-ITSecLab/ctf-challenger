@@ -1,0 +1,1213 @@
+{
+  "dashboard": {
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Total number of events processed by Suricata",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 1,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    $__timeInterval(timestamp) as t,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE $__timeFilter(timestamp)\nGROUP BY t\nORDER BY t",
+            "refId": "A"
+          }
+        ],
+        "title": "Total Events Over Time",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Distribution of different event types",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    event_type,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE $__timeFilter(timestamp)\nGROUP BY event_type\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "Events by Type",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top alert signatures by count",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        },
+        "id": 4,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    alert_signature as signature,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'alert'\n  AND $__timeFilter(timestamp)\nGROUP BY signature\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top Alert Signatures",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Alerts by severity level",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        },
+        "id": 5,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    toString(alert_severity) as severity,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'alert'\n  AND $__timeFilter(timestamp)\nGROUP BY severity\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "Alert Severity Distribution",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top DNS queries by volume",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        },
+        "id": 6,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    dns_rrname as domain,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'dns'\n  AND $__timeFilter(timestamp)\nGROUP BY domain\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top DNS Queries",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Distribution of DNS query types",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        },
+        "id": 7,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    dns_rrtype as query_type,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'dns'\n  AND $__timeFilter(timestamp)\nGROUP BY query_type\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "DNS Query Types",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top HTTP hostnames by request volume",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        },
+        "id": 8,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    http_hostname as hostname,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'http'\n  AND $__timeFilter(timestamp)\nGROUP BY hostname\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top HTTP Hostnames",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Distribution of HTTP status codes",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        },
+        "id": 9,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    toString(http_status) as status_code,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'http'\n  AND $__timeFilter(timestamp)\nGROUP BY status_code\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "HTTP Status Codes",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top TLS Server Name Indication values",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 32
+        },
+        "id": 10,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    tls_sni as sni,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'tls'\n  AND $__timeFilter(timestamp)\n  AND tls_sni != ''\nGROUP BY sni\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top TLS SNI",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Distribution of TLS versions",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 32
+        },
+        "id": 11,
+        "options": {
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "values": true,
+            "limit": "",
+            "fields": ""
+          },
+          "tooltip": {
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    tls_version as version,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE event_type = 'tls'\n  AND $__timeFilter(timestamp)\nGROUP BY version\nORDER BY count DESC",
+            "refId": "A"
+          }
+        ],
+        "title": "TLS Versions",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top source IP addresses by event count",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 40
+        },
+        "id": 12,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    src_ip as source_ip,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE $__timeFilter(timestamp)\n  AND src_ip != '::'\nGROUP BY source_ip\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top Source IPs",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Top destination IP addresses by event count",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 40
+        },
+        "id": 13,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Count"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 0,
+            "rawQuery": true,
+            "rawSql": "SELECT\n    dest_ip as destination_ip,\n    count() as count\nFROM suricata.backend_eve_logs\nWHERE $__timeFilter(timestamp)\n  AND dest_ip != '::'\nGROUP BY destination_ip\nORDER BY count DESC\nLIMIT 10",
+            "refId": "A"
+          }
+        ],
+        "title": "Top Destination IPs",
+        "type": "table"
+      },
+      {
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "${DS_CLICKHOUSE}"
+        },
+        "description": "Search and filter through all logs with advanced filtering options",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "filterable": true,
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 12,
+          "w": 24,
+          "x": 0,
+          "y": 48
+        },
+        "id": 14,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Time"
+            }
+          ]
+        },
+        "pluginVersion": "9.3.1",
+        "targets": [
+          {
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "${DS_CLICKHOUSE}"
+            },
+            "format": 2,
+            "queryType": "logs",
+            "rawQuery": true,
+            "rawSql": "SELECT\n    timestamp as Time,\n    event_type,\n    CAST(src_ip AS String) as src_ip,\n    CAST(dest_ip AS String) as dest_ip,\n    src_port,\n    dest_port,\n    proto,\n    app_proto,\n    \n    -- Alert fields\n    alert_signature,\n    alert_severity,\n    alert_category,\n    alert_action,\n    \n    -- HTTP fields\n    http_hostname,\n    http_url,\n    http_method,\n    http_status,\n    http_user_agent,\n    \n    -- DNS fields\n    dns_rrname,\n    dns_rrtype,\n    dns_type,\n    \n    -- TLS fields\n    tls_sni,\n    tls_version,\n    tls_subject,\n    tls_issuer,\n    \n    -- Flow fields\n    flow_bytes_toserver,\n    flow_bytes_toclient,\n    flow_pkts_toserver,\n    flow_pkts_toclient,\n    \n    -- Network metadata\n    in_iface,\n    flow_id,\n    community_id,\n    \n    -- Subnet classification (computed)\n    if(startsWith(CAST(src_ip AS String), '::ffff:10.128.'), \n       concat('10.128.', toString(toUInt8(splitByChar('.', CAST(src_ip AS String))[4])), '.0/24'), \n       'external') as src_subnet_class,\n    if(startsWith(CAST(dest_ip AS String), '::ffff:10.128.'), \n       concat('10.128.', toString(toUInt8(splitByChar('.', CAST(dest_ip AS String))[4])), '.0/24'), \n       'external') as dest_subnet_class,\n    \n    -- Payload preview (first 100 chars)\n    if(length(payload_printable) > 100, \n       concat(substring(payload_printable, 1, 100), '...'), \n       payload_printable) as payload_preview,\n    \n    -- JSON data selector (for detailed view)\n    multiIf(\n        event_type = 'alert' AND alert_json != '', alert_json,\n        event_type = 'http' AND http_json != '', http_json,\n        event_type = 'dns' AND dns_json != '', dns_json,\n        event_type = 'tls' AND tls_json != '', tls_json,\n        event_type = 'ssh' AND ssh_json != '', ssh_json,\n        event_type = 'flow' AND flow_json != '', flow_json,\n        event_type = 'files' AND files_json != '', files_json,\n        event_type = 'smtp' AND smtp_json != '', smtp_json,\n        event_type = 'ftp' AND ftp_json != '', ftp_json,\n        event_type = 'stats' AND stats_json != '', stats_json,\n        ''\n    ) as event_json\n\nFROM suricata.backend_eve_logs\nWHERE $__timeFilter(timestamp)\n  -- Event type filter - simplified to avoid Grafana variable issues\n  AND (\n    ${event_type} = 'All' OR \n    event_type = ${event_type}\n  )\n  -- Subnet filter with /24 granularity\n  AND (\n       '$subnet_filter' = 'All' OR\n       ('$subnet_filter' = 'internal_any' AND (\n           startsWith(CAST(src_ip AS String), '::ffff:10.128.') OR \n           startsWith(CAST(dest_ip AS String), '::ffff:10.128.')\n       )) OR\n       ('$subnet_filter' = 'internal_both' AND (\n           startsWith(CAST(src_ip AS String), '::ffff:10.128.') AND \n           startsWith(CAST(dest_ip AS String), '::ffff:10.128.')\n       )) OR\n       ('$subnet_filter' = 'external_traffic' AND (\n           NOT startsWith(CAST(src_ip AS String), '::ffff:10.128.') OR \n           NOT startsWith(CAST(dest_ip AS String), '::ffff:10.128.')\n       )) OR\n       (startsWith('$subnet_filter', '10.128.') AND (\n           startsWith(CAST(src_ip AS String), concat('::ffff:', '$subnet_filter')) OR\n           startsWith(CAST(dest_ip AS String), concat('::ffff:', '$subnet_filter'))\n       ))\n  )\n  \n  -- Search functionality - simplified patterns\n  AND (\n       '$search' = '' OR\n       alert_signature ILIKE '%$search%' OR\n       alert_category ILIKE '%$search%' OR\n       http_hostname ILIKE '%$search%' OR\n       http_url ILIKE '%$search%' OR\n       http_user_agent ILIKE '%$search%' OR\n       dns_rrname ILIKE '%$search%' OR\n       tls_sni ILIKE '%$search%' OR\n       tls_subject ILIKE '%$search%' OR\n       tls_issuer ILIKE '%$search%' OR\n       payload_printable ILIKE '%$search%' OR\n       CAST(src_ip AS String) ILIKE '%$search%' OR\n       CAST(dest_ip AS String) ILIKE '%$search%' OR\n       flow_id ILIKE '%$search%' OR\n       community_id ILIKE '%$search%'\n  )\n  \n  -- Severity filter for alerts\n  AND ('$min_severity' = 'All' OR event_type != 'alert' OR alert_severity >= toUInt8('$min_severity'))\n\nORDER BY timestamp ASC\nLIMIT $limit",
+            "refId": "A"
+          }
+        ],
+        "title": "Log Explorer",
+        "type": "table"
+      }
+    ],
+    "refresh": "30s",
+    "revision": 1,
+    "schemaVersion": 37,
+    "style": "dark",
+    "tags": [],
+    "templating": {
+      "list": [
+        {
+          "current": {
+            "selected": false,
+            "text": "ClickHouse",
+            "value": "ClickHouse"
+          },
+          "description": "ClickHouse Data Source",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Data Source",
+          "multi": false,
+          "name": "clickhouse_ds",
+          "options": [],
+          "query": "grafana-clickhouse-datasource",
+          "queryValue": "",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "datasource"
+        },
+        {
+          "allValue": "'All'",
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "'All'"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT event_type FROM suricata.backend_eve_logs WHERE timestamp >= now() - INTERVAL 7 DAY ORDER BY event_type",
+          "description": "Filter by event type",
+          "hide": 0,
+          "includeAll": true,
+          "label": "Event Type",
+          "multi": true,
+          "name": "event_type",
+          "options": [],
+          "query": "SELECT DISTINCT event_type FROM suricata.backend_eve_logs WHERE timestamp >= now() - INTERVAL 7 DAY ORDER BY event_type",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "description": "Filter by subnet traffic",
+          "hide": 0,
+          "allValue": "All",
+          "includeAll": true,
+          "label": "Subnet Filter",
+          "multi": false,
+          "name": "subnet_filter",
+          "options": [
+            {
+              "selected": true,
+              "text": "All Traffic",
+              "value": "All"
+            },
+            {
+              "selected": false,
+              "text": "Internal Traffic (Any 10.128.x)",
+              "value": "internal_any"
+            },
+            {
+              "selected": false,
+              "text": "Internal Only (Both 10.128.x)",
+              "value": "internal_both"
+            },
+            {
+              "selected": false,
+              "text": "External Traffic",
+              "value": "external_traffic"
+            }
+          ],
+          "query": "internal_any,internal_both,external_traffic",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "custom"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "${DS_CLICKHOUSE}"
+          },
+          "definition": "SELECT DISTINCT subnet\nFROM\n(\n    -- Source IPs\n    SELECT\n        concat(\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[1], '.',   -- 10\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[2], '.',   -- 128\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[3], '.0/24' -- 12.0/24\n        ) AS subnet\n    FROM suricata.backend_eve_logs\n    WHERE startsWith(IPv6NumToString(src_ip), '::ffff:10.') \n      AND timestamp >= now() - INTERVAL 7 DAY\n\n    UNION ALL\n\n    -- Destination IPs\n    SELECT\n        concat(\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[1], '.', \n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[2], '.', \n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[3], '.0/24'\n        ) AS subnet\n    FROM suricata.backend_eve_logs\n    WHERE startsWith(IPv6NumToString(dest_ip), '::ffff:10.') \n      AND timestamp >= now() - INTERVAL 7 DAY\n)\nORDER BY subnet\n",
+          "description": "Specific /24 subnet filter",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Specific Subnet",
+          "multi": false,
+          "name": "specific_subnet",
+          "options": [],
+          "query": "SELECT DISTINCT subnet\nFROM\n(\n    -- Source IPs\n    SELECT\n        concat(\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[1], '.',   -- 10\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[2], '.',   -- 128\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(src_ip))[2])[3], '.0/24' -- 12.0/24\n        ) AS subnet\n    FROM suricata.backend_eve_logs\n    WHERE startsWith(IPv6NumToString(src_ip), '::ffff:10.') \n      AND timestamp >= now() - INTERVAL 7 DAY\n\n    UNION ALL\n\n    -- Destination IPs\n    SELECT\n        concat(\n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[1], '.', \n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[2], '.', \n            splitByChar('.', splitByString('::ffff:', IPv6NumToString(dest_ip))[2])[3], '.0/24'\n        ) AS subnet\n    FROM suricata.backend_eve_logs\n    WHERE startsWith(IPv6NumToString(dest_ip), '::ffff:10.') \n      AND timestamp >= now() - INTERVAL 7 DAY\n)\nORDER BY subnet\n",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "query"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "",
+            "value": ""
+          },
+          "description": "Search across all text fields",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Search",
+          "multi": false,
+          "name": "search",
+          "options": [],
+          "query": "",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "textbox"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "All",
+            "value": "All"
+          },
+          "description": "Minimum alert severity (1=high, 2=medium, 3=low)",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Min Severity",
+          "multi": false,
+          "name": "min_severity",
+          "options": [
+            {
+              "selected": true,
+              "text": "All",
+              "value": "All"
+            },
+            {
+              "selected": false,
+              "text": "High (1)",
+              "value": "1"
+            },
+            {
+              "selected": false,
+              "text": "Medium+ (2)",
+              "value": "2"
+            },
+            {
+              "selected": false,
+              "text": "Low+ (3)",
+              "value": "3"
+            }
+          ],
+          "query": "1,2,3",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "custom"
+        },
+        {
+          "current": {
+            "selected": true,
+            "text": "1000",
+            "value": "1000"
+          },
+          "description": "Maximum number of results",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Limit",
+          "multi": false,
+          "name": "limit",
+          "options": [
+            {
+              "selected": false,
+              "text": "100",
+              "value": "100"
+            },
+            {
+              "selected": false,
+              "text": "500",
+              "value": "500"
+            },
+            {
+              "selected": true,
+              "text": "1000",
+              "value": "1000"
+            },
+            {
+              "selected": false,
+              "text": "5000",
+              "value": "5000"
+            },
+            {
+              "selected": false,
+              "text": "10000",
+              "value": "10000"
+            }
+          ],
+          "query": "100,500,1000,5000,10000",
+          "refresh": 1,
+          "regex": "",
+          "skipUrlSync": false,
+          "type": "custom"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Suricata BACKEND Dashboard",
+    "version": 1,
+    "weekStart": ""
+  },
+  "folderUid": null,
+  "message": "Suricata BACKEND Dashboard imported",
+  "overwrite": true,
+  "inputs": [
+    {
+      "name": "DS_CLICKHOUSE",
+      "type": "datasource",
+      "pluginId": "grafana-clickhouse-datasource",
+      "value": "ClickHouse"
+    }
+  ]
+}

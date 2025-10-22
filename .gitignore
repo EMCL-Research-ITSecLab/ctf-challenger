@@ -5,3 +5,11 @@ __pycache__
 **/.env
 backend/certificates
 database/backups
+**/*.phar
+webserver/html/vendor
+**/.phpunit.result.cache
+yaml/ctf-config.yaml
+yaml/ubuntu-cloudimg.yaml
+yaml/dc1.yaml
+tests/performance/utils/**.pem
+tests/security

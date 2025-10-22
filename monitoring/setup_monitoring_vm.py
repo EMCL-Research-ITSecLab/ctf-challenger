@@ -56,7 +56,7 @@ MONITORING_VM_EXPORTER_PORT = os.getenv("MONITORING_VM_EXPORTER_PORT", "9100")
 WEBSERVER_APACHE_EXPORTER_PORT = os.getenv("WEBSERVER_APACHE_EXPORTER_PORT", "9117")
 GRAFANA_PORT = os.getenv("GRAFANA_PORT", "3000")
 PROMETHEUS_PORT = os.getenv("PROMETHEUS_PORT", "9090")
-PROXMOX_EXTERNAL_IP = os.getenv("PROXMOX_EXTERNAL_IP", "10.0.2.3")
+PROXMOX_INTERNAL_IP = os.getenv("PROXMOX_INTERNAL_IP", "10.0.2.3")
 PROXMOX_SSH_KEYFILE = os.getenv("PROXMOX_SSH_KEYFILE", "/root/.ssh/id_rsa.pub")
 PROXMOX_EXPORTER_TOKEN_NAME = os.getenv("PROXMOX_EXPORTER_TOKEN_NAME", "pve_exporter_token")
 PVE_EXPORTER_DIR = os.getenv("PVE_EXPORTER_DIR", "/etc/pve-exporter")
@@ -857,13 +857,12 @@ def configure_proxmox_iptables():
     """Configure iptables rules for port forwarding to monitoring VM"""
     log_section("Configuring Proxmox IPTables")
 
-    proxmox_external_ip = PROXMOX_EXTERNAL_IP  # Adjust to your Proxmox external IP
     monitoring_vm_ip = VM_IP
     backend_interface = BACKEND_NETWORK_DEVICE
 
     iptables_commands = [
         # Port forwarding for Grafana
-        f"iptables -t nat -A PREROUTING -p tcp -d {proxmox_external_ip} --dport {GRAFANA_PORT} -j DNAT --to-destination {monitoring_vm_ip}:{GRAFANA_PORT}",
+        f"iptables -t nat -A PREROUTING -p tcp -d {PROXMOX_INTERNAL_IP} --dport {GRAFANA_PORT} -j DNAT --to-destination {monitoring_vm_ip}:{GRAFANA_PORT}",
         # Masquerade traffic from monitoring VM
         f"iptables -t nat -A POSTROUTING -s {monitoring_vm_ip} -o {backend_interface} -j MASQUERADE",
         # Allow forwarded Grafana traffic

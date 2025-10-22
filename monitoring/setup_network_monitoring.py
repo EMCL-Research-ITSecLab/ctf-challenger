@@ -507,7 +507,7 @@ end
         f.write(
             "alert tcp any any -> any any (msg:\"CTF: Rapid Port Hopping\"; flags:S; threshold:type both,track by_src,count 20,seconds 30; sid:9001020; priority:2;)\n")
         f.write(
-            "alert tcp any any -> any any (msg:\"CTF: Sequential Port Scan\"; flags:S; detection_filter:track by_src, count 10, seconds 10; threshold:type limit, track by_src, count 2, seconds 30; sid:9001021; priority:3;)\n")
+            "alert tcp any any -> any any (msg:\"CTF: Sequential Port Scan\"; flags:S; threshold:type threshold,track by_src,count 10,seconds 10; sid:9001021; priority:3;)\n")
 
         # DNS tunneling detection
         f.write(

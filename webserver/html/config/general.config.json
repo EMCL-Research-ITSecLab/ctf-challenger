@@ -45,7 +45,7 @@
     "TWITTER_REGEX": "^https:\\/\\/(www\\.)?(twitter\\.com|x\\.com)\\/([a-zA-Z0-9_]+)\\/?$",
     "MIN_FULL_NAME_LENGTH": 1,
     "MAX_FULL_NAME_LENGTH": 30,
-    "FULL_NAME_REGEX": "^\\p{Lu}\\p{L}+( \\p{Lu}\\p{L}+)+$"
+    "FULL_NAME_REGEX": "^\\p{Lu}\\p{L}+(?:[’'\\-]\\p{Lu}?\\p{L}+)*(?: (?:\\p{Lu}\\p{L}+|von|van|vom|zu|zum|zur|de|du|des|del|da|dos|le|la|of)(?:[’'\\-]\\p{Lu}?\\p{L}+)*)*$"
   },
   "upload": {
     "CHUNK_SIZE": 104857600,

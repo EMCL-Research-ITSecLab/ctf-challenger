@@ -102,10 +102,6 @@ class LoginForm {
             const contentType = response.headers.get('content-type');
             if (contentType?.includes('application/json')) {
                 const data = await response.json().catch(() => null);
-                if (data && data.csrf_token) {
-                    document.cookie = `csrf_token=${data.csrf_token}; path=/; samesite=strict`;
-                }
-
                 if (data && data.redirect) {
                     window.location.href = data.redirect;
                 }
@@ -145,10 +141,6 @@ class LoginForm {
 
             if (!response.ok || !data.success) {
                 throw new Error(data.message || 'Login failed.');
-            }
-
-            if (data.csrf_token) {
-                document.cookie = `csrf_token=${data.csrf_token}; path=/; samesite=strict`;
             }
 
             setTimeout(() => {

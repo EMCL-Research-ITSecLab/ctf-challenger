@@ -1,80 +1,119 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class LogoutHandler
 {
     private ?int $userId;
     private string $csrfToken;
+    private string $route;
 
-    public function __construct()
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private ICookie $cookie;
+    
+    private ISystem $system;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->cookie = $cookie;
+        $this->route = "/logout";
+
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+        
+        $this->system = $system;
+
         $this->initSession();
         $this->validateSession();
         $this->parseRequest();
-        logDebug("Initialized LogoutHandler for user ID: {$this->userId}");
+        $this->logger->logDebug("Initialized LogoutHandler for user ID: $this->userId");
     }
 
-    private function initSession()
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
     }
 
-    private function validateSession()
+    /**
+     * @throws Exception
+     */
+    private function validateSession(): void
     {
-        if (!validate_session() || empty($_SESSION['authenticated'])) {
-            logWarning("Unauthorized logout attempt - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Unauthorized - Please login', 401);
+        if (!$this->securityHelper->validateSession() || empty($this->session['authenticated'])) {
+            $this->logger->logWarning("Unauthorized logout attempt - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Unauthorized - Please login', 401);
         }
 
-        $this->userId = $_SESSION['user_id'] ?? 'unknown';
+        $this->userId = $this->session['user_id'] ?? 'unknown';
     }
 
-    private function parseRequest()
+    private function parseRequest(): void
     {
-        $this->csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        $this->csrfToken = $this->cookie['csrf_token'] ?? '';
     }
 
-    public function handleRequest()
+    public function handleRequest(): void
     {
         try {
             $this->validateCsrfToken();
             $this->destroySession();
             $this->sendSuccessResponse();
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->handleError($e);
+        } // @codeCoverageIgnoreStart
+        catch (Exception $e) {
+            // most likely not reachable, gonna leave it here for safety
+            $this->handleError(new Exception('Internal Server Error', 500));
+        }
+        // @codeCoverageIgnoreEnd
+    }
+
+    /**
+     * @throws Exception
+     */
+    private function validateCsrfToken(): void
+    {
+        if (!$this->securityHelper->validateCsrfToken($this->csrfToken)) {
+            $this->logger->logError("Invalid CSRF token during logout - User ID: $this->userId, Token: $this->csrfToken, IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Invalid CSRF token', 403);
         }
     }
 
-    private function validateCsrfToken()
+    private function destroySession(): void
     {
-        if (!validate_csrf_token($this->csrfToken)) {
-            logError("Invalid CSRF token during logout - User ID: {$this->userId}, Token: {$this->csrfToken}, IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Invalid security token', 403);
-        }
-    }
-
-    private function destroySession()
-    {
-        session_unset();
-        session_destroy();
+        $this->session->unset();
+        $this->session->destroy();
 
         $this->expireSessionCookies();
     }
 
-    private function expireSessionCookies()
+    private function expireSessionCookies(): void
     {
-        $params = session_get_cookie_params();
-        setcookie(
-            session_name(),
+        $params = $this->session->get_cookie_params();
+        $this->system->setcookie(
+            $this->session->name(),
             '',
             [
-                'expires' => time() - 3600,
+                'expires' => $this->system->time() - 3600,
                 'path' => $params['path'],
                 'domain' => $params['domain'],
                 'secure' => $params['secure'],
@@ -83,11 +122,11 @@ class LogoutHandler
             ]
         );
 
-        setcookie(
+        $this->system->setcookie(
             'csrf_token',
             '',
             [
-                'expires' => time() - 3600,
+                'expires' => $this->system->time() - 3600,
                 'path' => '/',
                 'secure' => true,
                 'httponly' => true,
@@ -96,39 +135,47 @@ class LogoutHandler
         );
     }
 
-    private function sendSuccessResponse()
+    private function sendSuccessResponse(): void
     {
         echo json_encode([
             'success' => true,
             'message' => 'Logged out successfully'
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 
-    private function handleError(Exception $e)
+    private function handleError(Exception $e): void
     {
         $code = $e->getCode() ?: 500;
         http_response_code($code);
 
-        logError("Logout failed - Code: {$code}, Message: " . $e->getMessage() .
-            ", User ID: {$this->userId}" .
-            ", IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+        $this->logger->logError("Logout failed - Code: $code, Message: " . $e->getMessage() .
+            ", User ID: $this->userId" .
+            ", IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
 
         echo json_encode([
             'success' => false,
             'message' => $e->getMessage()
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
+    header('Content-Type: application/json');
+
     $handler = new LogoutHandler();
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in logout endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in logout endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -139,4 +186,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in logout endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

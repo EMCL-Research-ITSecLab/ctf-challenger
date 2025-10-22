@@ -1,19 +1,43 @@
 <?php
 
-require_once '/var/www/html/includes/db.php';
-require_once '/var/www/html/includes/curlHelper.php';
-require_once '/var/www/html/includes/auth.php';
+// @codeCoverageIgnoreStart
+if (defined('PHPUNIT_RUNNING')) 
+    require_once __DIR__ . '/../../vendor/autoload.php';
+else
+    require_once '/var/www/html/vendor/autoload.php';
+// @codeCoverageIgnoreEnd
+
 
 class ChallengeWorker
 {
-    private $pdo;
+    private PDO $pdo;
+    private IDatabaseHelper $databaseHelper;
+    private ICurlHelper $curlHelper;
+    private IAuthHelper $authHelper;
+    private bool $logErrors;
+    private ISystem $system;
 
-    public function __construct()
-    {
-        $this->pdo = getPDO();
+    public function __construct(
+        IDatabaseHelper $databaseHelper = null,
+        ICurlHelper $curlHelper = null,
+        IAuthHelper $authHelper = null,
+        
+        bool $logErrors = true,
+        ISystem $system = new SystemWrapper(),
+        IEnv $env = new Env(),
+        ILogger $logger = null
+        
+    ) {        
+        $this->logErrors = $logErrors;
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->curlHelper = $curlHelper ?? new CurlHelper($env);
+        $this->authHelper = $authHelper ?? new AuthHelper($logger, $system, $env);
+
+        $this->pdo = $this->databaseHelper->getPDO();
+        $this->system = $system;
     }
 
-    public function run()
+    public function run(): void
     {
         try {
             $expiredChallenges = $this->getExpiredChallenges();
@@ -29,74 +53,83 @@ class ChallengeWorker
 
             $this->logMessage("Successfully processed " . count($expiredChallenges) . " expired challenges.");
 
-        } catch (Exception $e) {
-            error_log("ChallengeWorker error: " . $e->getMessage());
+        } catch (CustomException $e) {
+            $this->logError("ChallengeWorker error: " . $e->getMessage());
             $this->logMessage("Error processing challenges: " . $e->getMessage());
+        } catch (Exception $e) {
+            $this->logError("Unexpected error: " . $e->getMessage());
+            $this->logMessage("Unexpected error: " . $e->getMessage());
         }
     }
 
-    private function getExpiredChallenges()
+    private function getExpiredChallenges(): array
     {
         $stmt = $this->pdo->prepare("
             SELECT
-                u.id AS user_id,
-                u.username,
-                c.id AS challenge_id,
-                c.challenge_template_id,
-                c.expires_at
-            FROM users u
-            JOIN challenges c ON u.running_challenge = c.id
-            WHERE c.expires_at <= NOW()
+                user_id,
+                username,
+                challenge_id,
+                challenge_template_id,
+                expires_at
+            FROM get_expired_challenge_data()
         ");
 
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    private function processExpiredChallenge($challenge)
+    /**
+     * @throws Exception
+     */
+    private function processExpiredChallenge($challenge): void
     {
         $this->pdo->beginTransaction();
 
         try {
             $this->stopChallenge($challenge['user_id']);
             $this->markAttemptAsCompleted($challenge['user_id'], $challenge['challenge_template_id']);
+            $this->logUserNetworkTraceStop($challenge['user_id'], $challenge['challenge_template_id']);
             if ($this->shouldDeleteChallengeTemplate($challenge['challenge_template_id'])) {
                 $this->deleteChallengeTemplate($challenge['challenge_template_id']);
             }
 
             $this->pdo->commit();
 
-            error_log("Successfully processed expired challenge for user {$challenge['username']} (ID: {$challenge['user_id']})");
+            $this->logError("Successfully processed expired challenge for user {$challenge['username']} (ID: {$challenge['user_id']})");
 
+        } catch (CustomException $e) {
+            $this->pdo->rollBack();
+            $this->logError("Failed to process expired challenge for user {$challenge['username']}: " . $e->getMessage());
+            throw $e;
         } catch (Exception $e) {
             $this->pdo->rollBack();
-            error_log("Failed to process expired challenge for user {$challenge['username']}: " . $e->getMessage());
+            $this->logError("Unexpected error: " . $e->getMessage());
+            $this->logMessage("Unexpected error: " . $e->getMessage());
             throw $e;
         }
     }
 
-    private function stopChallenge($userId)
+    /**
+     * @throws Exception
+     */
+    private function stopChallenge($userId): void
     {
-        $result = makeBackendRequest(
+        $result = $this->curlHelper->makeBackendRequest(
             '/stop-challenge',
             'POST',
-            getBackendHeaders(),
+            $this->authHelper->getBackendHeaders(),
             ['user_id' => $userId]
         );
 
         if (!$result['success'] || $result['http_code'] !== 200) {
-            throw new Exception("Failed to stop challenge: " . ($result['error'] ?? "HTTP {$result['http_code']}"));
+            throw new CustomException("Failed to stop challenge: " . ($result['error'] ?? "HTTP {$result['http_code']}"));
         }
     }
 
-    private function markAttemptAsCompleted($userId, $challengeTemplateId)
+    private function markAttemptAsCompleted($userId, $challengeTemplateId): void
     {
         $stmt = $this->pdo->prepare("
-            UPDATE completed_challenges
-            SET completed_at = NOW()
-            WHERE user_id = :user_id
-            AND challenge_template_id = :challenge_id
-            AND completed_at IS NULL
+            SELECT * FROM mark_attempt_completed(:user_id, :challenge_id)
         ");
         $stmt->execute([
             'user_id' => $userId,
@@ -104,122 +137,72 @@ class ChallengeWorker
         ]);
     }
 
-    private function shouldDeleteChallengeTemplate($challengeTemplateId)
+    private function logUserNetworkTraceStop($userId, $challengeTemplateId): void
     {
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(*)
-            FROM challenges
-            WHERE challenge_template_id = :template_id
+            SELECT stop_user_network_trace(:userid, :challenge_template_id)
         ");
-        $stmt->execute(['template_id' => $challengeTemplateId]);
-        $remainingInstances = $stmt->fetchColumn();
-
-        $stmt = $this->pdo->prepare("
-            SELECT marked_for_deletion
-            FROM challenge_templates
-            WHERE id = :template_id
-        ");
-        $stmt->execute(['template_id' => $challengeTemplateId]);
-        $markedForDeletion = $stmt->fetchColumn();
-
-        return $markedForDeletion && $remainingInstances === 0;
+        $stmt->execute([
+            'userid' => $userId,
+            'challenge_template_id' => $challengeTemplateId
+        ]);
     }
 
-    private function deleteChallengeTemplate($challengeTemplateId)
+    private function shouldDeleteChallengeTemplate($challengeTemplateId): bool
     {
         $stmt = $this->pdo->prepare("
-            DELETE FROM completed_challenges
-            WHERE challenge_template_id = :challenge_id
+            SELECT challenge_template_should_be_deleted(:template_id) AS remaining_instances
         ");
-        $stmt->execute(['challenge_id' => $challengeTemplateId]);
-        $result = makeBackendRequest(
+        $stmt->execute(['template_id' => $challengeTemplateId]);
+        return $stmt->fetchColumn() == 1;
+    }
+
+    /**
+     * @throws Exception
+     */
+    private function deleteChallengeTemplate($challengeTemplateId): void
+    {
+        $result = $this->curlHelper->makeBackendRequest(
             '/delete-machine-templates',
             'POST',
-            getBackendHeaders(),
+            $this->authHelper->getBackendHeaders(),
             ['challenge_id' => $challengeTemplateId]
         );
 
         if (!$result['success'] || $result['http_code'] !== 200) {
-            throw new Exception("Failed to delete VM templates: " . ($result['error'] ?? "HTTP {$result['http_code']}"));
+            throw new CustomException("Failed to delete VM templates: " . ($result['error'] ?? "HTTP {$result['http_code']}"));
         }
 
-        $tables = [
-            'challenge_flags',
-            'challenge_hints',
-            'network_connection_templates',
-            'machine_templates',
-            'network_templates',
-            'challenge_templates'
-        ];
+        $stmt = $this->pdo->prepare("
+            SELECT delete_challenge_template(:challenge_id)
+        ");
+        $stmt->execute(['challenge_id' => $challengeTemplateId]);
 
-        foreach ($tables as $table) {
-            switch ($table) {
-                case 'network_connection_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM network_connection_templates
-                        WHERE machine_template_id IN (
-                            SELECT id FROM machine_templates
-                            WHERE challenge_template_id = :challenge_id
-                        )
-                    ");
-                    $stmt->execute(['challenge_id' => $challengeTemplateId]);
-                    break;
-
-                case 'machine_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM machine_templates
-                        WHERE challenge_template_id = :challenge_id
-                    ");
-                    $stmt->execute(['challenge_id' => $challengeTemplateId]);
-                    break;
-
-                case 'network_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM network_templates
-                        WHERE id IN (
-                            SELECT nct.network_template_id
-                            FROM network_connection_templates nct
-                            JOIN machine_templates mt ON nct.machine_template_id = mt.id
-                            WHERE mt.challenge_template_id = :challenge_id
-                        )
-                        AND NOT EXISTS (
-                            SELECT 1 FROM network_connection_templates nct2
-                            WHERE nct2.network_template_id = network_templates.id
-                            AND nct2.machine_template_id NOT IN (
-                                SELECT id FROM machine_templates
-                                WHERE challenge_template_id = :challenge_id
-                            )
-                        )
-                    ");
-                    $stmt->execute(['challenge_id' => $challengeTemplateId]);
-                    break;
-
-                case 'challenge_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM challenge_templates
-                        WHERE id = :challenge_id
-                    ");
-                    $stmt->execute(['challenge_id' => $challengeTemplateId]);
-                    break;
-
-                default:
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM {$table}
-                        WHERE challenge_template_id = :challenge_id
-                    ");
-                    $stmt->execute(['challenge_id' => $challengeTemplateId]);
-                    break;
-            }
-        }
-
-        $this->logMessage("Successfully deleted challenge template ID {$challengeTemplateId}");
+        $this->logMessage("Successfully deleted challenge template ID $challengeTemplateId");
     }
 
-    private function logMessage($message)
+    private function logMessage($message): void
     {
-        echo "[" . date('Y-m-d H:i:s') . "] $message\n";
+        echo "[" . $this->system->date('Y-m-d H:i:s') . "] $message\n";
+    }
+    
+    private function logError($message): void
+    {
+        if(!$this->logErrors)
+            return;
+
+        // @codeCoverageIgnoreStart
+        error_log($message);
+        // @codeCoverageIgnoreEnd
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 $worker = new ChallengeWorker();
 $worker->run();
+
+// @codeCoverageIgnoreEnd

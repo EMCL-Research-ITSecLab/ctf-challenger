@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-$generalConfig = json_decode(file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class ProfileHandlerPublic
 {
@@ -14,71 +9,118 @@ class ProfileHandlerPublic
     private ?int $userId;
     private string $requestedUsername;
     private array $generalConfig;
+    private string $route;
 
-    public function __construct(array $generalConfig)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private ICookie $cookie;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $generalConfig,
+
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->cookie = $cookie;
+        $this->route = "/profile_view";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+
         $this->generalConfig = $generalConfig;
-        $this->pdo = getPDO();
-        $this->requestedUsername = trim($_GET['username'] ?? '');
+        $this->pdo = $this->databaseHelper->getPDO();
+        $this->requestedUsername = trim($this->get['username'] ?? '');
         $this->initSession();
         $this->validateRequest();
         $this->initializeUserData();
-        logDebug("Initialized ProfileHandlerPublic for username: {$this->requestedUsername}");
+        $this->logger->logDebug("Initialized ProfileHandlerPublic for username: $this->requestedUsername");
     }
 
-    private function initSession()
+    /**
+     * @throws Exception
+     */
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
 
-        if (!validate_session()) {
-            logWarning("Unauthorized access attempt to profile - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Unauthorized', 401);
+        if (!$this->securityHelper->validateSession()) {
+            $this->logger->logWarning("Unauthorized access attempt to profile - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Unauthorized', 401);
         }
     }
 
-    private function validateRequest()
+    /**
+     * @throws Exception
+     */
+    private function validateRequest(): void
     {
         if (empty($this->requestedUsername)) {
-            logError("Empty username requested - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Username is required', 400);
+            $this->logger->logError("Empty username requested - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Username is required', 400);
         }
 
         if (strlen($this->requestedUsername) > $this->generalConfig['user']['MAX_USERNAME_LENGTH'] ||
             strlen($this->requestedUsername) < $this->generalConfig['user']['MIN_USERNAME_LENGTH'] ||
             !preg_match('/' . $this->generalConfig['user']['USERNAME_REGEX'] . '/', $this->requestedUsername)) {
-            logError("Invalid username format requested: {$this->requestedUsername}");
-            throw new Exception('Invalid username format', 400);
+            $this->logger->logError("Invalid username format requested: $this->requestedUsername");
+            throw new CustomException('Invalid username format', 400);
         }
 
-        if (in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])) {
-            $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-            if (!validate_csrf_token($csrfToken)) {
-                logWarning("Invalid CSRF token in profile request - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-                throw new Exception('Invalid request', 403);
+        if (in_array($this->server['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])) {
+            $csrfToken = $this->cookie['csrf_token'] ?? '';
+            if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+                $this->logger->logWarning("Invalid CSRF token in profile request - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+                throw new CustomException('Invalid CSRF token', 403);
             }
         }
     }
 
-    private function initializeUserData()
+    /**
+     * @throws Exception
+     */
+    private function initializeUserData(): void
     {
         try {
-            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE username = :username");
+            $stmt = $this->pdo->prepare("
+                SELECT get_id_by_username(:username) AS id
+            ");
             $stmt->execute(['username' => $this->requestedUsername]);
-            $user = $stmt->fetch();
+            $user = $stmt->fetchColumn();
 
             if (!$user) {
-                logError("User not found in profile view: {$this->requestedUsername}");
-                throw new Exception('Profile not found', 404);
+                $this->logger->logError("User not found in profile view: $this->requestedUsername");
+                throw new CustomException('Profile not found', 404);
             }
 
-            $this->userId = (int)$user['id'];
+            $this->userId = (int)$user;
         } catch (PDOException $e) {
-            logError("Database error during profile initialization: " . $e->getMessage());
-            throw new Exception('Database error occurred', 500);
+            $this->logger->logError("Database error during profile initialization: " . $e->getMessage());
+            throw new CustomException('Database error occurred', 500);
         }
     }
 
-    public function handleRequest()
+    public function handleRequest(): void
     {
         try {
             $profileData = $this->getBasicProfileData();
@@ -95,72 +137,42 @@ class ProfileHandlerPublic
             ];
 
             $this->sendResponse($response);
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->handleError($e);
+        } // @codeCoverageIgnoreStart
+        catch (Exception $e) {
+            // most likely not reachable, gonna leave it here for safety
+            $this->handleError(new Exception('Internal Server Error', 500));
         }
+        // @codeCoverageIgnoreEnd
     }
 
     private function getBasicProfileData(): array
     {
         try {
             $stmt = $this->pdo->prepare("
-                WITH flag_counts AS (
-                    SELECT challenge_template_id, COUNT(*) AS total_flags
-                    FROM challenge_flags
-                    GROUP BY challenge_template_id
-                ),
-                user_flags AS (
-                    SELECT cc.challenge_template_id, COUNT(DISTINCT cc.flag_id) AS user_flag_count
-                    FROM completed_challenges cc
-                    JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    WHERE cc.user_id = :user_id
-                    GROUP BY cc.challenge_template_id
-                ),
-                solved AS (
-                    SELECT uf.challenge_template_id
-                    FROM user_flags uf
-                    JOIN flag_counts fc ON uf.challenge_template_id = fc.challenge_template_id
-                    WHERE uf.user_flag_count = fc.total_flags
-                ),
-                total_points AS (
-                    SELECT COALESCE(SUM(cf.points), 0) AS total_points
-                    FROM completed_challenges cc
-                    JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    WHERE cc.user_id = :user_id
-                )
-                SELECT
-                    u.username,
-                    u.created_at,
-                    u.avatar_url,
-                    p.bio,
-                    p.github_url,
-                    p.twitter_url,
-                    p.website_url,
-                    (SELECT COUNT(*) FROM solved) AS solved_count,
-                    (SELECT total_points FROM total_points) AS total_points
-                FROM users u
-                LEFT JOIN user_profiles p ON p.user_id = u.id
-                WHERE u.id = :user_id
+                SELECT 
+                    username,
+                    created_at,
+                    avatar_url,
+                    bio,
+                    github_url,
+                    twitter_url,
+                    website_url,
+                    solved_count,
+                    total_points
+                FROM get_public_profile_data(:user_id)
             ");
             $stmt->execute(['user_id' => $this->userId]);
             $profileData = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$profileData) {
-                logError("Profile data not found for user ID: {$this->userId}");
-                throw new RuntimeException('Profile data not found', 404);
+                $this->logger->logError("Profile data not found for user ID: $this->userId");
+                throw new CustomException('Profile data not found', 404);
             }
 
             $rankStmt = $this->pdo->prepare("
-                SELECT COUNT(*) + 1 AS user_rank
-                FROM (
-                    SELECT u.id, COALESCE(SUM(cf.points), 0) AS points
-                    FROM users u
-                    LEFT JOIN completed_challenges cc ON cc.user_id = u.id
-                    LEFT JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    GROUP BY u.id
-                    HAVING COALESCE(SUM(cf.points), 0) > :user_points
-                        OR (COALESCE(SUM(cf.points), 0) = :user_points AND u.id < :user_id)
-                ) ranked_users
+                SELECT get_user_rank(:user_id, :user_points) AS user_rank
             ");
             $rankStmt->execute([
                 'user_points' => $profileData['total_points'],
@@ -183,8 +195,8 @@ class ProfileHandlerPublic
                 'solved_count' => (int)$profileData['solved_count']
             ];
         } catch (PDOException $e) {
-            logError("Database error in getBasicProfileData: " . $e->getMessage());
-            throw new RuntimeException('Could not load profile data', 500);
+            $this->logger->logError("Database error in getBasicProfileData: " . $e->getMessage());
+            throw new CustomException('Could not load profile data', 500);
         }
     }
 
@@ -192,41 +204,18 @@ class ProfileHandlerPublic
     {
         try {
             $successStmt = $this->pdo->prepare("
-                WITH flag_counts AS (
-                    SELECT challenge_template_id, COUNT(*) AS total_flags
-                    FROM challenge_flags
-                    GROUP BY challenge_template_id
-                ),
-                user_flags AS (
-                    SELECT cc.challenge_template_id, COUNT(DISTINCT cc.flag_id) AS user_flag_count
-                    FROM completed_challenges cc
-                    JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    WHERE cc.user_id = :user_id
-                    GROUP BY cc.challenge_template_id
-                ),
-                solved AS (
-                    SELECT uf.challenge_template_id
-                    FROM user_flags uf
-                    JOIN flag_counts fc ON uf.challenge_template_id = fc.challenge_template_id
-                    WHERE uf.user_flag_count = fc.total_flags
-                ),
-                total_points AS (
-                    SELECT COALESCE(SUM(cf.points), 0) AS total_points
-                    FROM completed_challenges cc
-                    JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    WHERE cc.user_id = :user_id
-                )
-                SELECT
-                    (SELECT COUNT(*) FROM solved) AS solved,
-                    (SELECT COUNT(DISTINCT challenge_template_id) FROM completed_challenges WHERE user_id = :user_id) AS attempts,
-                    (SELECT total_points FROM total_points) AS total_points
+                SELECT 
+                    solved,
+                    total_points,
+                    attempts
+                FROM get_profile_stats(:user_id)
             ");
             $successStmt->execute(['user_id' => $this->userId]);
             $successData = $successStmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$successData) {
-                logError("Failed to retrieve stats for user ID: {$this->userId}");
-                throw new RuntimeException('Failed to retrieve profile statistics', 500);
+                $this->logger->logError("Failed to retrieve stats for user ID: $this->userId");
+                throw new CustomException('Failed to retrieve profile statistics', 500);
             }
 
             $successRate = 0;
@@ -246,50 +235,34 @@ class ProfileHandlerPublic
                 'total_attempts' => (int)$successData['attempts']
             ];
         } catch (PDOException $e) {
-            logError("Database error in getProfileStats: " . $e->getMessage());
-            throw new RuntimeException('Failed to retrieve profile statistics', 500);
+            $this->logger->logError("Database error in getProfileStats: " . $e->getMessage());
+            throw new CustomException('Failed to retrieve profile statistics', 500);
         }
     }
 
     private function getCategoryData(): array
     {
         try {
-            $stmt = $this->pdo->query("SELECT unnest(enum_range(NULL::challenge_category)) AS category ORDER BY category");
+            $stmt = $this->pdo->query("
+                SELECT category FROM get_all_challenge_categories()
+            ");
             $allCategories = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
             if (empty($allCategories)) {
-                logError("No challenge categories found in database");
-                throw new RuntimeException('No challenge categories found', 500);
+                $this->logger->logError("No challenge categories found in database");
+                throw new CustomException('No challenge categories found', 500);
             }
 
             $totals = [];
             $stmt = $this->pdo->query("
-                SELECT category, COUNT(*) as total 
-                FROM challenge_templates 
-                WHERE is_active = true
-                GROUP BY category
+                SELECT category, total FROM get_active_challenge_templates_by_category()
             ");
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $totals[$row['category']] = (int)$row['total'];
             }
 
             $stmt = $this->pdo->prepare("
-                WITH solved_challenges AS (
-                    SELECT cc.challenge_template_id
-                    FROM completed_challenges cc
-                    JOIN challenge_flags cf ON cc.flag_id = cf.id
-                    WHERE cc.user_id = :user_id
-                    GROUP BY cc.challenge_template_id
-                    HAVING COUNT(DISTINCT cf.id) = (
-                        SELECT COUNT(*) 
-                        FROM challenge_flags 
-                        WHERE challenge_template_id = cc.challenge_template_id
-                    )
-                )
-                SELECT ct.category, COUNT(sc.challenge_template_id) as solved
-                FROM solved_challenges sc
-                JOIN challenge_templates ct ON ct.id = sc.challenge_template_id
-                GROUP BY ct.category
+                SELECT category, solved FROM get_user_solved_challenge_count_by_categories(:user_id)
             ");
             $stmt->execute(['user_id' => $this->userId]);
             $solved = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -307,8 +280,8 @@ class ProfileHandlerPublic
                 'solved_counts' => array_replace(array_fill_keys($allCategories, 0), $solved)
             ];
         } catch (PDOException $e) {
-            logError("Database error in getCategoryData: " . $e->getMessage());
-            throw new RuntimeException('Failed to retrieve category data', 500);
+            $this->logger->logError("Database error in getCategoryData: " . $e->getMessage());
+            throw new CustomException('Failed to retrieve category data', 500);
         }
     }
 
@@ -316,11 +289,13 @@ class ProfileHandlerPublic
     {
         try {
             $badgeStmt = $this->pdo->prepare("
-                SELECT b.id, b.name, b.description, b.icon, b.color
-                FROM user_badges ub
-                JOIN badges b ON b.id = ub.badge_id
-                WHERE ub.user_id = :user_id
-                ORDER BY b.rarity DESC, ub.earned_at DESC
+                SELECT
+                    id,
+                    name,
+                    description,
+                    icon,
+                    color
+                FROM get_user_earned_badges_data(:user_id)
             ");
             $badgeStmt->execute(['user_id' => $this->userId]);
             $badges = $badgeStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -335,7 +310,9 @@ class ProfileHandlerPublic
                 ];
             }, $badges);
 
-            $totalStmt = $this->pdo->query("SELECT COUNT(*) AS total FROM badges");
+            $totalStmt = $this->pdo->query("
+                SELECT get_total_badges_count() AS total
+            ");
             $totalBadges = (int)$totalStmt->fetch(PDO::FETCH_ASSOC)['total'];
 
             $earnedCount = count($sanitizedBadges);
@@ -346,8 +323,8 @@ class ProfileHandlerPublic
                 'total_badges' => $totalBadges
             ];
         } catch (PDOException $e) {
-            logError("Database error in getProfileBadges: " . $e->getMessage());
-            throw new RuntimeException('Failed to retrieve badge information', 500);
+            $this->logger->logError("Database error in getProfileBadges: " . $e->getMessage());
+            throw new CustomException('Failed to retrieve badge information', 500);
         }
     }
 
@@ -357,7 +334,6 @@ class ProfileHandlerPublic
             'username' => htmlspecialchars($data['username']),
             'join_date' => $data['join_date'],
             'avatar_url' => filter_var($data['avatar_url'], FILTER_SANITIZE_URL),
-            'full_name' => htmlspecialchars($data['full_name'] ?? ''),
             'bio' => htmlspecialchars($data['bio'] ?? ''),
             'social_links' => [
                 'github' => filter_var($data['social_links']['github'] ?? '', FILTER_SANITIZE_URL),
@@ -370,27 +346,31 @@ class ProfileHandlerPublic
         ];
     }
 
-    private function sendResponse(array $response)
+    private function sendResponse(array $response): void
     {
         echo json_encode($response);
     }
 
-    private function handleError(Exception $e)
+    private function handleError(Exception $e): void
     {
         $errorCode = $e->getCode() ?: 500;
         $errorMessage = $e->getMessage();
 
         if ($errorCode === 401) {
-            session_unset();
-            session_destroy();
-            logWarning("Session destroyed due to unauthorized access");
+            // @codeCoverageIgnoreStart
+            // This block is probably not reachable since authentication is required to reach this point
+            // Wont be deleted for security reasons
+            $this->session->unset();
+            $this->session->destroy();
+            $this->logger->logWarning("Session destroyed due to unauthorized access");
+            // @codeCoverageIgnoreEnd
         }
 
         if ($errorCode >= 500) {
             $errorMessage = 'An internal server error occurred';
-            logError("Internal error : " . $e->getMessage());
+            $this->logger->logError("Internal error : " . $e->getMessage());
         } else {
-            logError("Profile error: " . $e->getMessage());
+            $this->logger->logError("Profile error: " . $e->getMessage());
         }
 
         http_response_code($errorCode);
@@ -402,13 +382,23 @@ class ProfileHandlerPublic
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new ProfileHandlerPublic($generalConfig);
+    header('Content-Type: application/json');
+    $system = new SystemWrapper();
+    $generalConfig = json_decode($system->file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+
+    $handler = new ProfileHandlerPublic(generalConfig: $generalConfig);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in profile_view endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in profile_view endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -419,4 +409,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in profile_view endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

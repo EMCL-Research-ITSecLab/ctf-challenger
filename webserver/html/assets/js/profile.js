@@ -3,7 +3,6 @@ import themeToggle from './theme-toggle.js';
 
 class ProfileManager {
     constructor() {
-        this.userId = document.getElementById('user-id').value;
         this.selectedAvatar = null;
         this.categoryChart = null;
 

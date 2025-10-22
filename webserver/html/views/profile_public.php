@@ -11,7 +11,6 @@
 </head>
 <body>
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/header.html'); ?>
-<!--#include virtual="/partials/header.html" -->
 <main class="profile-container">
     <div class="profile-grid">
         <section class="account-info-card">
@@ -96,7 +95,6 @@
     </div>
 </main>
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>
-<!--#include virtual="/partials/footer.html" -->
 
 <script type="module" src="../assets/js/profile_public.js"></script>
 </body>

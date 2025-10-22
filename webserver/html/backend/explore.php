@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-$config = require __DIR__ . '/../config/backend.config.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class ExploreHandler
 {
@@ -15,39 +10,90 @@ class ExploreHandler
     private bool $isPublic = true;
     private array $config;
     private int $perPage = 12;
+    private string $route;
 
-    public function __construct(array $config)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private ICookie $cookie;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $config,
+
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->cookie = $cookie;
+        $this->route = "/explore";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+
         $this->config = $config;
         $this->initSession();
         $this->validateRequest();
-        $this->pdo = getPDO();
-        $this->userId = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
-        logDebug("Initialized ExploreHandler for user ID: " . ($this->userId ?? 'guest'));
+        $this->pdo = $this->databaseHelper->getPDO();
+        $this->userId = $this->session['user_id'] ?? null;
+        $this->logger->logDebug("Initialized ExploreHandler for user ID: " . ($this->userId ?? 'guest'));
     }
 
-    private function initSession()
+    /**
+     * @throws Exception
+     */
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
 
-        if (!$this->isPublic && !validate_session()) {
-            logWarning('Unauthorized access attempt to explore route');
-            throw new Exception('Unauthorized - Please login', 401);
+        if (!$this->isPublic && !$this->securityHelper->validateSession()) {
+            // @codeCoverageIgnoreStart
+            // This branch cananot be tested when isPublic is set to true by default
+            $this->logger->logWarning('Unauthorized access attempt to explore route');
+            throw new CustomException('Unauthorized - Please login', 401);
+            // @codeCoverageIgnoreEnd
         }
     }
 
-    private function validateRequest()
+    /**
+     * @throws Exception
+     */
+    private function validateRequest(): void
     {
         if (!$this->isPublic) {
-            $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-            if (!validate_csrf_token($csrfToken)) {
-                logWarning('Invalid CSRF token attempt from user: ' . ($_SESSION['user_id'] ?? 'unknown'));
-                throw new Exception('Invalid CSRF token.', 403);
+            // @codeCoverageIgnoreStart
+            // This branch cananot be tested when isPublic is set to true by default
+            $csrfToken = $this->cookie['csrf_token'] ?? '';
+            if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+                $this->logger->logWarning('Invalid CSRF token attempt from user: ' . ($this->session['user_id'] ?? 'unknown'));
+                throw new CustomException('Invalid CSRF token.', 403);
             }
+            // @codeCoverageIgnoreEnd
         }
     }
 
-    public function handleRequest()
+    /**
+     * @throws Exception
+     */
+    public function handleRequest(): void
     {
         try {
             $params = $this->parseInputParameters();
@@ -56,40 +102,40 @@ class ExploreHandler
 
             $this->sendResponse($response);
         } catch (PDOException $e) {
-            logError("Database error in explore route: " . $e->getMessage());
-            throw new Exception('Failed to retrieve challenges', 500);
+            $this->logger->logError("Database error in explore route: " . $e->getMessage());
+            throw new CustomException('Failed to retrieve challenges', 500);
         }
     }
 
-    private function parseInputParameters()
+    private function parseInputParameters(): array
     {
-        $search = $_GET['search'] ?? '';
-        $category = $_GET['category'] ?? 'all';
-        $difficulty = $_GET['difficulty'] ?? 'all';
-        $sort = $_GET['sort'] ?? 'popularity';
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+        $search = $this->get['search'] ?? '';
+        $category = $this->get['category'] ?? 'all';
+        $difficulty = $this->get['difficulty'] ?? 'all';
+        $sort = $this->get['sort'] ?? 'popularity';
+        $page = isset($this->get['page']) ? (int)$this->get['page'] : 1;
 
         if (!in_array($category, $this->config['filters']['CHALLENGE_CATEGORIES'])) {
-            logDebug("Invalid category requested: $category - Defaulting to 'all'");
+            $this->logger->logDebug("Invalid category requested: $category - Defaulting to 'all'");
             $category = 'all';
         }
 
         if (!in_array($difficulty, $this->config['filters']['CHALLENGE_DIFFICULTIES'])) {
-            logDebug("Invalid difficulty requested: $difficulty - Defaulting to 'all'");
+            $this->logger->logDebug("Invalid difficulty requested: $difficulty - Defaulting to 'all'");
             $difficulty = 'all';
         }
 
         if (!in_array($sort, $this->config['sorts']['VALID'])) {
-            logDebug("Invalid sort requested: $sort - Defaulting to 'popularity'");
+            $this->logger->logDebug("Invalid sort requested: $sort - Defaulting to 'popularity'");
             $sort = 'popularity';
         }
 
         if ($page < 1) {
-            logDebug("Invalid page number requested: $page - Defaulting to 1");
+            $this->logger->logDebug("Invalid page number requested: $page - Defaulting to 1");
             $page = 1;
         }
 
-        $search_param = !empty($search) ? "%{$search}%" : '';
+        $search_param = !empty($search) ? "%$search%" : '';
 
         return [
             'search' => $search,
@@ -101,33 +147,42 @@ class ExploreHandler
         ];
     }
 
-    private function fetchChallenges($params)
+    private function fetchChallenges($params): array
     {
-        $query = $this->buildBaseQuery();
-        $whereConditions = $this->buildWhereConditions($params);
-        $params['limit'] = $this->perPage;
-        $params['offset'] = ($params['page'] - 1) * $this->perPage;
+        $offset = ($params['page'] - 1) * $this->perPage;
 
-        if (!empty($whereConditions)) {
-            $query .= " WHERE " . implode(" AND ", $whereConditions);
-        }
-
-        $query .= $this->buildGroupBy();
-        $query .= $this->buildOrderBy($params['sort']);
-
-        $countQuery = "SELECT COUNT(*) FROM ($query) AS total";
-        $countStmt = $this->pdo->prepare($countQuery);
-        $this->bindCommonParams($countStmt, $params);
-        $countStmt->execute();
+        $countStmt = $this->pdo->prepare("
+            SELECT explore_challenges_count(:category, :difficulty, :search) AS total
+        ");
+        $countStmt->execute([
+            ':category' => $params['category'] === 'all' ? null : $params['category'],
+            ':difficulty' => $params['difficulty'] === 'all' ? null : $params['difficulty'],
+            ':search' => $params['search_param'] === '' ? null : $params['search_param']
+        ]);
         $totalItems = (int)$countStmt->fetchColumn();
 
-        $query .= " LIMIT :limit OFFSET :offset";
-        $stmt = $this->pdo->prepare($query);
-        $this->bindCommonParams($stmt, $params);
-        $stmt->bindValue(':limit', $params['limit'], PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $params['offset'], PDO::PARAM_INT);
-        $stmt->execute();
-
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                id,
+                name,
+                description,
+                category,
+                difficulty,
+                created_at,
+                image_path,
+                is_active,
+                solved_count,
+                attempted_count
+            FROM explore_challenges(:category, :difficulty, :search, :order_by, :limit, :offset)
+        ");
+        $stmt->execute([
+            ':category' => $params['category'] === 'all' ? null : $params['category'],
+            ':difficulty' => $params['difficulty'] === 'all' ? null : $params['difficulty'],
+            ':search' => $params['search_param'] === '' ? null : $params['search_param'],
+            ':order_by' => $params['sort'],
+            ':limit' => $this->perPage,
+            ':offset' => $offset
+        ]);
         $challenges = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return [
@@ -138,107 +193,7 @@ class ExploreHandler
         ];
     }
 
-    private function buildBaseQuery()
-    {
-        return "
-WITH user_completed_flags AS (
-    SELECT 
-        user_id,
-        challenge_template_id,
-        flag_id
-    FROM completed_challenges
-),
-challenge_total_flags AS (
-    SELECT 
-        challenge_template_id, 
-        COUNT(*) as total_flags
-    FROM challenge_flags
-    GROUP BY challenge_template_id
-),
-user_solved_challenges AS (
-    SELECT 
-        ucf.user_id,
-        ucf.challenge_template_id
-    FROM user_completed_flags ucf
-    JOIN challenge_total_flags ctf ON ucf.challenge_template_id = ctf.challenge_template_id
-    GROUP BY ucf.user_id, ucf.challenge_template_id
-    HAVING COUNT(DISTINCT ucf.flag_id) = MAX(ctf.total_flags)
-)
-SELECT 
-    ct.id,
-    ct.name,
-    ct.description,
-    ct.category,
-    ct.difficulty,
-    ct.created_at,
-    ct.image_path,
-    ct.is_active,
-    COUNT(DISTINCT usc.user_id) AS solved_count,
-    COUNT(DISTINCT cc.user_id) AS attempted_count
-FROM challenge_templates ct
-LEFT JOIN user_solved_challenges usc ON usc.challenge_template_id = ct.id
-LEFT JOIN completed_challenges cc ON cc.challenge_template_id = ct.id";
-    }
-
-    private function buildWhereConditions($params)
-    {
-        $conditions = [];
-
-        if ($params['category'] !== 'all') {
-            $conditions[] = "ct.category = :category";
-        }
-
-        if ($params['difficulty'] !== 'all') {
-            $conditions[] = "ct.difficulty = :difficulty";
-        }
-
-        if (!empty($params['search'])) {
-            $conditions[] = "(ct.name ILIKE :search OR ct.description ILIKE :search)";
-        }
-
-        return $conditions;
-    }
-
-    private function buildGroupBy()
-    {
-        return " GROUP BY ct.id, ct.name, ct.description, ct.category, ct.difficulty, ct.created_at, ct.image_path";
-    }
-
-    private function buildOrderBy($sort)
-    {
-        switch ($sort) {
-            case 'date':
-                return " ORDER BY ct.created_at DESC";
-            case 'difficulty':
-                return " ORDER BY 
-                    CASE ct.difficulty
-                        WHEN 'easy' THEN 1
-                        WHEN 'medium' THEN 2
-                        WHEN 'hard' THEN 3
-                        ELSE 0
-                    END";
-            case 'popularity':
-            default:
-                return " ORDER BY solved_count DESC, attempted_count DESC";
-        }
-    }
-
-    private function bindCommonParams($stmt, $params)
-    {
-        if ($params['category'] !== 'all') {
-            $stmt->bindValue(':category', $params['category']);
-        }
-
-        if ($params['difficulty'] !== 'all') {
-            $stmt->bindValue(':difficulty', $params['difficulty']);
-        }
-
-        if (!empty($params['search'])) {
-            $stmt->bindValue(':search', $params['search_param']);
-        }
-    }
-
-    private function buildResponse($challenges, $params)
+    private function buildResponse($challenges, $params): array
     {
         $formattedChallenges = array_map([$this, 'formatChallenge'], $challenges['data']);
 
@@ -259,7 +214,7 @@ LEFT JOIN completed_challenges cc ON cc.challenge_template_id = ct.id";
         ];
     }
 
-    private function formatChallenge($challenge)
+    private function formatChallenge($challenge): array
     {
         $solvedStatus = $this->userId ? $this->getUserChallengeData($challenge['id']) : null;
 
@@ -272,7 +227,7 @@ LEFT JOIN completed_challenges cc ON cc.challenge_template_id = ct.id";
             'image' => htmlspecialchars($challenge['image_path'] ?? '../assets/images/ctf-default.png', ENT_QUOTES, 'UTF-8'),
             'created_at' => $challenge['created_at'],
             'is_active' => $challenge['is_active'],
-            'solved' => $solvedStatus === null ? null : (bool)$solvedStatus
+            'solved' => $solvedStatus
         ];
     }
 
@@ -280,72 +235,54 @@ LEFT JOIN completed_challenges cc ON cc.challenge_template_id = ct.id";
     {
         try {
             $stmt = $this->pdo->prepare("
-            WITH challenge_total_points AS (
-                SELECT 
-                    challenge_template_id,
-                    SUM(points) AS total_points
-                FROM challenge_flags
-                GROUP BY challenge_template_id
-            ),
-            user_completed_points AS (
-                SELECT 
-                    cc.user_id,
-                    cc.challenge_template_id,
-                    SUM(cf.points) AS user_points
-                FROM completed_challenges cc
-                JOIN challenge_flags cf ON cc.flag_id = cf.id
-                WHERE cc.user_id = :user_id
-                GROUP BY cc.user_id, cc.challenge_template_id
-            )
-            SELECT 
-                COALESCE(ucp.user_points, 0) >= COALESCE(ctp.total_points, 0) AS solved
-            FROM challenge_templates ct
-            LEFT JOIN challenge_total_points ctp ON ctp.challenge_template_id = ct.id
-            LEFT JOIN user_completed_points ucp 
-                ON ucp.challenge_template_id = ct.id AND ucp.user_id = :user_id
-            WHERE ct.id = :challenge_template_id
-        ");
+                SELECT get_user_solved_challenge(:user_id, :challenge_template_id) AS solved
+            ");
             $stmt->execute([
                 ':user_id' => $this->userId,
                 ':challenge_template_id' => $challengeId
             ]);
-            $data = $stmt->fetch(PDO::FETCH_ASSOC);
+            $data = $stmt->fetchColumn();
 
-            if (!$data) {
-                return null;
-            }
-
-            return $data['solved'];
+            return $data;
         } catch (PDOException $e) {
-            logError("Database error in getUserChallengeData for user {$this->userId} and challenge $challengeId: " . $e->getMessage());
+            $this->logger->logError("Database error in getUserChallengeData for user $this->userId and challenge $challengeId: " . $e->getMessage());
             return null;
         }
     }
 
-    private function sendResponse($response)
+    private function sendResponse($response): void
     {
         echo json_encode(['success' => true, 'data' => $response]);
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new ExploreHandler($config);
+    header('Content-Type: application/json');
+    $config = require __DIR__ . '/../config/backend.config.php';
+
+    $handler = new ExploreHandler(config: $config);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     $errorMessage = $e->getMessage();
+    $logger = new Logger(route: $this->route);
 
     if ($errorCode === 401) {
-        session_unset();
-        session_destroy();
-        logWarning("Session destroyed due to unauthorized access");
+        $this->session->unset();
+        $this->session->destroy();
+        $logger->logWarning("Session destroyed due to unauthorized access");
     }
 
     if ($errorCode >= 500) {
         $errorMessage = 'An internal server error occurred';
-        logError("Internal error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+        $logger->logError("Internal error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
     } else {
-        logError("Explore endpoint error: " . $e->getMessage());
+        $logger->logError("Explore endpoint error: " . $e->getMessage());
     }
 
     http_response_code($errorCode);
@@ -354,4 +291,14 @@ try {
         'message' => $errorMessage,
         'redirect' => $errorCode === 401 ? '/login' : null
     ]);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in explore endpoint: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

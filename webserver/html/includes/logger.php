@@ -1,48 +1,97 @@
 <?php
-function logError($message)
+declare(strict_types=1);
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+class Logger implements ILogger
 {
-    $logFile = '/var/log/ctf-challenger/api_errors.log';
-    $timestamp = date("Y-m-d H:i:s");
-    $formattedMessage = "[$timestamp] ERROR: $message\n";
+    private string $errorLogFile;
+    private string $infoLogFile;
+    private string $debugLogFile;
+    private string $warningLogFile;
+    private string $route;
 
-    file_put_contents($logFile, $formattedMessage, FILE_APPEND);
-}
+    private ISystem $system;
 
-function logInfo($message)
-{
-    $logFile = '/var/log/ctf-challenger/api_info.log';
-    $timestamp = date("Y-m-d H:i:s");
-    $formattedMessage = "[$timestamp] INFO: $message\n";
+    public function __construct(
+        string $route,
+        string $errorLogFile = '/var/log/ctf-challenger/api_errors.log',
+        string $infoLogFile = '/var/log/ctf-challenger/api_info.log',
+        string $debugLogFile = '/var/log/ctf-challenger/api_debug.log',
+        string $warningLogFile = '/var/log/ctf-challenger/api_warning.log',
+        ISystem $system = new SystemWrapper()
+    )
+    {
+        $this->route = $route;
+        $this->errorLogFile = $errorLogFile;
+        $this->infoLogFile = $infoLogFile;
+        $this->debugLogFile = $debugLogFile;
+        $this->warningLogFile = $warningLogFile;
 
-    file_put_contents($logFile, $formattedMessage, FILE_APPEND);
-}
-
-function logDebug($message)
-{
-    $logFile = '/var/log/ctf-challenger/api_debug.log';
-    $timestamp = date("Y-m-d H:i:s");
-    $formattedMessage = "[$timestamp] DEBUG: $message\n";
-
-    file_put_contents($logFile, $formattedMessage, FILE_APPEND);
-}
-
-function logWarning($message)
-{
-    $logFile = '/var/log/ctf-challenger/api_warning.log';
-    $timestamp = date("Y-m-d H:i:s");
-    $formattedMessage = "[$timestamp] WARNING: $message\n";
-
-    file_put_contents($logFile, $formattedMessage, FILE_APPEND);
-}
-
-function anonymizeIp(string $ip): string
-{
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-        return preg_replace('/\.\d+$/', '.xxx', $ip);
+        $this->system = $system;
     }
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-        return preg_replace('/:[^:]+$/', ':xxxx', $ip);
+
+    private function formatLogMessage(string $level, string $message): string
+    {
+        $timestamp = $this->system->date("Y-m-d H:i:s");
+        $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $httpMethod = $_SERVER['REQUEST_METHOD'] ?? 'CLI';
+
+        return sprintf(
+            "[%s] [%s] [%s] [%s] [%s] : %s\n",
+            $timestamp,
+            strtoupper($level),
+            $this->route,
+            $httpMethod,
+            $this->anonymizeIp($remoteAddr),
+            $message
+        );
     }
-    return 'invalid-ip';
+
+    public function logError($message): void
+    {
+        $this->system->file_put_contents(
+            $this->errorLogFile,
+            $this->formatLogMessage('error', $message),
+            FILE_APPEND
+        );
+    }
+
+    public function logInfo($message): void
+    {
+        $this->system->file_put_contents(
+            $this->infoLogFile,
+            $this->formatLogMessage('info', $message),
+            FILE_APPEND
+        );
+    }
+
+    public function logDebug($message): void
+    {
+        $this->system->file_put_contents(
+            $this->debugLogFile,
+            $this->formatLogMessage('debug', $message),
+            FILE_APPEND
+        );
+    }
+
+    public function logWarning($message): void
+    {
+        $this->system->file_put_contents(
+            $this->warningLogFile,
+            $this->formatLogMessage('warning', $message),
+            FILE_APPEND
+        );
+    }
+
+    public function anonymizeIp(string $ip): string
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return preg_replace('/\.\d+$/', '.xxx', $ip);
+        }
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return preg_replace('/:[^:]+$/', ':xxxx', $ip);
+        }
+        return 'invalid-ip';
+    }
 }
-?>

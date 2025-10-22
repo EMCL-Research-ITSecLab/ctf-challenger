@@ -1,3 +1,16 @@
+<?php
+declare(strict_types=1);
+require_once __DIR__ . '/../vendor/autoload.php';
+
+$securityHelper = new SecurityHelper();
+$securityHelper->initSecureSession();
+
+if (!$securityHelper->validateSession()) {
+    header('Location: /404');
+    exit();
+}
+?>
+
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -11,8 +24,6 @@
 <body>
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/header.html'); ?>
 <main class="profile-container">
-    <input type="hidden" id="user-id" value="<?php echo $_SESSION['user_id']; ?>">
-
     <div class="profile-grid">
         <section class="account-info-card">
             <div class="account-info-nav">
@@ -303,7 +314,6 @@
         </section>
     </div>
 </main>
-<!--#include virtual="/partials/footer.html" -->
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>
 <div class="modal" id="passwordModal">
     <div class="modal-content">

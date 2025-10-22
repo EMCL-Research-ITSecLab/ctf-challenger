@@ -1,13 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-require_once __DIR__ . '/../includes/curlHelper.php';
-require_once __DIR__ . '/../includes/auth.php';
-$config = require __DIR__ . '/../config/backend.config.php';
-$generalConfig = json_decode(file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class CtfCreationHandler
 {
@@ -18,69 +12,129 @@ class CtfCreationHandler
     private array $inputData;
     private array $config;
     private array $generalConfig;
+    private string $route;
 
-    public function __construct(array $config, array $generalConfig)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ICurlHelper $curlHelper;
+    private IAuthHelper $authHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private IPost $post;
+    private IFiles $files;
+    private ICookie $cookie;
+
+    private ISystem $system;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $config,
+        array $generalConfig,
+
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ICurlHelper $curlHelper = null,
+        IAuthHelper $authHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+        IPost $post = new Post(),
+        IFiles $files = new Files(),
+
+        ISystem $system = new SystemWrapper(),
+        IEnv $env = new Env(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->post = $post;
+        $this->files = $files;
+        $this->cookie = $cookie;
+        $this->route = "/create-ctf";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->curlHelper = $curlHelper ?? new CurlHelper($env);
+        $this->authHelper = $authHelper ?? new AuthHelper($logger, $system, $env);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+
+        $this->system = $system;
+
         header('Content-Type: application/json');
         $this->config = $config;
         $this->generalConfig = $generalConfig;
-        $this->pdo = getPDO();
+        $this->pdo = $this->databaseHelper->getPDO();
         $this->initSession();
         $this->validateAccess();
-        $this->userId = $_SESSION['user_id'];
-        $this->action = $_GET['action'] ?? '';
+        $this->userId = $this->session['user_id'];
+        $this->action = $this->get['action'] ?? '';
         $this->inputData = $this->parseInputData();
 
-        logDebug("Initialized CTFCreationHandler for user ID: {$this->userId}, Action: {$this->action}");
+        $this->logger->logDebug("Initialized CTFCreationHandler for user ID: $this->userId, Action: $this->action");
     }
 
     private function initSession(): void
     {
         try {
-            init_secure_session();
+            $this->securityHelper->initSecureSession();
+        } catch (CustomException $e) {
+            $this->logger->logError("Session initialization failed: " . $e->getMessage());
+            throw new CustomException('Session initialization error', 401);
         } catch (Exception $e) {
-            logError("Session initialization failed: " . $e->getMessage());
-            throw new RuntimeException('Session initialization error', 401);
+            $this->logger->logError("Unexpected error during session initialization: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
     }
 
+    /**
+     * @throws Exception
+     */
     private function validateAccess(): void
     {
-        if (!validate_session()) {
-            logWarning("Unauthorized access attempt from IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new RuntimeException('Unauthorized - Please login', 401);
+        if (!$this->securityHelper->validateSession()) {
+            $this->logger->logWarning("Unauthorized access attempt from IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Unauthorized - Please login', 401);
         }
 
-        $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        if (!validate_csrf_token($csrfToken)) {
-            logWarning("Invalid CSRF token from user ID: " . ($_SESSION['user_id'] ?? 'unknown'));
-            throw new RuntimeException('Invalid request token', 403);
+        $csrfToken = $this->cookie['csrf_token'] ?? '';
+        if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+            $this->logger->logWarning("Invalid CSRF token from user ID: " . ($this->session['user_id'] ?? 'unknown'));
+            throw new CustomException('Invalid CSRF token', 403);
         }
 
-        if (!validate_admin_access($this->pdo)) {
-            logWarning("Unauthorized admin access attempt by user ID: ". ($_SESSION['user_id'] ?? 'unknown'));
-            throw new RuntimeException('Unauthorized - Admin access required', 403);
+        if (!$this->securityHelper->validateAdminAccess($this->pdo)) {
+            $this->logger->logWarning("Unauthorized admin access attempt by user ID: ". ($this->session['user_id'] ?? 'unknown'));
+            throw new CustomException('Unauthorized - Admin access required', 403);
         }
     }
 
     private function parseInputData(): array
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        if ($this->server['REQUEST_METHOD'] === 'GET') {
             return [];
         }
 
-        $jsonInput = json_decode(file_get_contents('php://input'), true);
+        $jsonInput = json_decode($this->system->file_get_contents('php://input'), true);
         if ($jsonInput !== null) {
-            return array_merge($_POST, $jsonInput);
+            return array_merge($this->post->all(), $jsonInput);
         }
 
-        return $_POST;
+        return $this->post->all();
     }
 
     public function handleRequest(): void
     {
         try {
-            switch ($_SERVER['REQUEST_METHOD']) {
+            switch ($this->server['REQUEST_METHOD']) {
                 case 'GET':
                     $this->handleGetRequest();
                     break;
@@ -88,10 +142,16 @@ class CtfCreationHandler
                     $this->handlePostRequest();
                     break;
                 default:
-                    throw new RuntimeException('Method not allowed', 405);
+                    throw new CustomException('Method not allowed', 405);
             }
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->handleError($e);
+        } catch (PDOException $e) {
+            $this->logger->logError("Database error in CTF creation route: " . $e->getMessage());
+            $this->handleError(new CustomException('Database error occurred', 500));
+        } catch (Exception $e) {
+            $this->logger->logError("Unexpected error in CTF creation route: " . $e->getMessage());
+            $this->handleError(new Exception('Internal Server Error', 500));
         }
     }
 
@@ -101,18 +161,21 @@ class CtfCreationHandler
         echo json_encode(['success' => true, 'ovas' => $ovas]);
     }
 
+    /**
+     * @throws Exception
+     */
     private function handlePostRequest(): void
     {
         $validationResult = $this->validateInput();
         if (!empty($validationResult['errors'])) {
-            logWarning("Validation errors for user {$this->userId}: " . implode(', ', $validationResult['errors']));
+            $this->logger->logWarning("Validation errors for user $this->userId: " . implode(', ', $validationResult['errors']));
             http_response_code(400);
             echo json_encode([
                 'success' => false,
                 'errors' => $validationResult['errors'],
                 'fields' => array_unique($validationResult['errorFields'])
             ]);
-            exit;
+            defined('PHPUNIT_RUNNING') || exit;
         }
 
         $this->checkDuplicateChallengeName();
@@ -157,7 +220,7 @@ class CtfCreationHandler
             $value = trim($this->inputData[$key] ?? '');
             validateFieldLength($value, $max, $label, $fieldKey, $errors, $errorFields);
 
-            if ($key === 'name' && !empty($value) && !preg_match('/' . $this->config['ctf']['CTF_NAME_REGEX'] . '/', $value)) {
+            if ($key === 'name' && !empty($value) && !preg_match('/' . $this->generalConfig['ctf']['CTF_NAME_REGEX'] . '/', $value)) {
                 $errors[] = "$label contains invalid characters";
                 $errorFields[] = "ctf-$fieldKey";
             }
@@ -188,9 +251,12 @@ class CtfCreationHandler
             $vms = $this->getValidatedJson('vms');
             $flags = $this->getValidatedJson('flags');
             $hints = $this->getValidatedJson('hints');
-        } catch (RuntimeException $e) {
+        } catch (CustomException $e) {
             $errors[] = $e->getMessage();
             return compact('errors', 'errorFields');
+        } catch (Exception $e) {
+            $this->logger->logError("Unexpected error during JSON validation: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
 
         $counts = [
@@ -210,13 +276,13 @@ class CtfCreationHandler
         }
 
         $vmNames = [];
-        foreach ($vms as $index => $vm) {
+        foreach ($vms as $vm) {
             $vmName = trim($vm['name'] ?? '');
             if (empty($vmName)) {
                 $errors[] = "VM name is required";
             } elseif (strlen($vmName) > $this->generalConfig['ctf']['MAX_VM_NAME_LENGTH']) {
                 $errors[] = "VM name cannot exceed " . $this->generalConfig['ctf']['MAX_VM_NAME_LENGTH'] . " characters";
-            } elseif (!preg_match('/' . $this->config['ctf']['VM_SUBNET_NAME_REGEX'] . '/', $vmName)) {
+            } elseif (!preg_match('/' . $this->generalConfig['ctf']['VM_SUBNET_NAME_REGEX'] . '/', $vmName)) {
                 $errors[] = "VM Name $vmName contains invalid characters";
             } elseif (in_array($vmName, $vmNames)) {
                 $errors[] = "Duplicate VM name found: $vmName";
@@ -238,19 +304,19 @@ class CtfCreationHandler
                 $errors[] = "VM $vmName: Domain name is required";
             } elseif (strlen($domain) > $this->generalConfig['ctf']['MAX_VM_DOMAIN_LENGTH']) {
                 $errors[] = "VM $vmName: Domain name cannot exceed " . $this->generalConfig['ctf']['MAX_VM_DOMAIN_LENGTH'];
-            } elseif (!preg_match('/' . $this->config['ctf']['DOMAIN_REGEX'] . '/', $domain)) {
+            } elseif (!preg_match('/' . $this->generalConfig['ctf']['DOMAIN_REGEX'] . '/', $domain)) {
                 $errors[] = "VM $vmName: Domain name contains invalid characters or has invalid structure";
             }
         }
 
         $subnetNames = [];
-        foreach ($subnets as $index => $subnet) {
+        foreach ($subnets as $subnet) {
             $subnetName = trim($subnet['name'] ?? '');
             if (empty($subnetName)) {
                 $errors[] = "Subnet name is required";
             } elseif (strlen($subnetName) > $this->generalConfig['ctf']['MAX_SUBNET_NAME_LENGTH']) {
                 $errors[] = "Subnet name cannot exceed " . $this->generalConfig['ctf']['MAX_SUBNET_NAME_LENGTH'] . " characters";
-            } elseif (!preg_match('/' . $this->config['ctf']['VM_SUBNET_NAME_REGEX'] . '/', $subnetName)) {
+            } elseif (!preg_match('/' . $this->generalConfig['ctf']['VM_SUBNET_NAME_REGEX'] . '/', $subnetName)) {
                 $errors[] = "Subnet Name $subnetName contains invalid characters";
             } elseif (in_array($subnetName, $subnetNames)) {
                 $errors[] = "Duplicate subnet name found: $subnetName";
@@ -300,8 +366,11 @@ class CtfCreationHandler
 
         try {
             $this->validateNetworkReachability($vms, $subnets);
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $errors[] = $e->getMessage();
+        } catch (Exception $e) {
+            $this->logger->logError("Unexpected error during network validation: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
 
         return compact('errors', 'errorFields');
@@ -313,8 +382,8 @@ class CtfCreationHandler
             $json = json_decode($this->inputData[$field] ?? '[]', true, 512, JSON_THROW_ON_ERROR);
             return is_array($json) ? $json : [];
         } catch (JsonException $e) {
-            logError("Invalid JSON input for field {$field} from user {$this->userId}: " . $e->getMessage());
-            throw new RuntimeException("Invalid input format for {$field}", 400);
+            $this->logger->logError("Invalid JSON input for field $field from user $this->userId: " . $e->getMessage());
+            throw new CustomException("Invalid input format for $field", 400);
         }
     }
 
@@ -322,8 +391,7 @@ class CtfCreationHandler
     {
         $name = trim($this->inputData['name']);
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(*) FROM challenge_templates 
-            WHERE LOWER(name) = LOWER(:name) AND creator_id = :user_id
+            SELECT count_user_challenges_with_same_name(:name, :user_id) AS count
         ");
         $stmt->execute([
             'name' => $name,
@@ -331,58 +399,71 @@ class CtfCreationHandler
         ]);
 
         if ($stmt->fetchColumn() > 0) {
-            logWarning("Duplicate challenge name attempt by user {$this->userId}: {$name}");
+            $this->logger->logWarning("Duplicate challenge name attempt by user $this->userId: $name");
             http_response_code(400);
             echo json_encode([
                 'success' => false,
                 'errors' => ['A challenge with this name already exists. Please choose a different name.'],
                 'fields' => ['ctf-name']
             ]);
-            exit;
+            defined('PHPUNIT_RUNNING') || exit;
         }
     }
 
     private function handleImageUpload(): ?string
     {
-        if (empty($_FILES['image']['tmp_name'])) {
+        if (empty($this->files['image']['tmp_name'])) {
             return null;
         }
 
-        $file = $_FILES['image'];
+        $file = $this->files['image'];
 
         if (!in_array($file['type'], $this->generalConfig['ctf']['ALLOWED_IMAGE_TYPES'])) {
-            throw new RuntimeException('Invalid image type. Only JPG, PNG and GIF are allowed', 400);
+            throw new CustomException('Invalid image type. Only JPG, PNG and GIF are allowed', 400);
         }
 
         if ($file['size'] > $this->generalConfig['ctf']['MAX_CTF_IMAGE_SIZE']) {
-            throw new RuntimeException('Image size too large. Maximum 2MB allowed', 400);
+            throw new CustomException('Image size too large. Maximum 2MB allowed', 400);
         }
 
         $imageInfo = @getimagesize($file['tmp_name']);
         if ($imageInfo === false) {
-            throw new RuntimeException('Uploaded file is not a valid image', 400);
+            throw new CustomException('Uploaded file is not a valid image', 400);
         }
 
         $uploadDir = __DIR__ . '/..' . $this->config['challenge']['UPLOAD_DIR'];
-        if (!file_exists($uploadDir)) {
-            if (!mkdir($uploadDir, 0755, true)) {
-                throw new RuntimeException('Failed to create upload directory', 500);
+        if (!$this->system->file_exists($uploadDir)) {
+            if (!$this->system->mkdir($uploadDir, 0755, true)) {
+                throw new CustomException('Failed to create upload directory', 500);
             }
         }
 
-        $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $extension = $this->system->pathinfo($file['name'], PATHINFO_EXTENSION);
         $filename = uniqid('challenge_') . '.' . $extension;
         $destination = $uploadDir . $filename;
 
-        if (!move_uploaded_file($file['tmp_name'], $destination)) {
-            $error = error_get_last();
-            throw new RuntimeException('Failed to save uploaded image: ' . ($error['message'] ?? 'Unknown error'), 500);
+        try {
+            $imagick = new Imagick($file['tmp_name']);
+            $imagick->stripImage(); // removes all metadata
+            $imagick->writeImage($file['tmp_name']); // overwrite the temp file without metadata
+            $imagick->clear();
+        } catch (Exception $e) {
+            $this->logger->logError("Failed to strip image metadata - User ID: $this->userId - " . $e->getMessage());
+            throw new CustomException('Error processing image', 500);
         }
 
-        chmod($destination, 0644);
+        if (!$this->system->move_uploaded_file($file['tmp_name'], $destination)) {
+            $error = error_get_last();
+            throw new CustomException('Failed to save uploaded image', 500);
+        }
+
+        $this->system->chmod($destination, 0644);
         return $this->config['challenge']['UPLOAD_DIR'] . $filename;
     }
 
+    /**
+     * @throws Exception
+     */
     private function createChallenge(?string $imagePath): int
     {
         $this->pdo->beginTransaction();
@@ -398,32 +479,40 @@ class CtfCreationHandler
 
             $this->importMachineTemplates($challengeId);
             return $challengeId;
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->pdo->rollBack();
-            logError("Database transaction rolled back due to error: " . $e->getMessage());
+            $this->logger->logError("Database transaction rolled back due to error: " . $e->getMessage());
 
             if (!empty($imagePath)) {
                 $fullPath = __DIR__ . '/..' . $imagePath;
-                if (file_exists($fullPath)) {
-                    @unlink($fullPath);
-                    logDebug("Cleaned up uploaded image after error: {$fullPath}");
+                if ($this->system->file_exists($fullPath)) {
+                    @$this->system->unlink($fullPath);
+                    $this->logger->logDebug("Cleaned up uploaded image after error: $fullPath");
                 }
             }
 
             throw $e;
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            $this->logger->logError("Unexpected error during challenge creation: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
     }
 
     private function insertChallengeTemplate(?string $imagePath): int
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO challenge_templates (
-                name, description, category, difficulty, 
-                image_path, is_active, creator_id, hint, solution
-            ) VALUES (
-                :name, :description, :category, :difficulty, 
-                :image_path, :is_active, :creator_id, :hint, :solution
-            ) RETURNING id
+            SELECT create_challenge_template(
+                :name,
+                :description,
+                :category,
+                :difficulty,
+                :image_path,
+                :is_active,
+                :creator_id,
+                :hint,
+                :solution
+            ) AS id
         ");
 
         $stmt->execute([
@@ -439,7 +528,7 @@ class CtfCreationHandler
         ]);
 
         $challengeId = $stmt->fetchColumn();
-        logInfo("Challenge template created with ID: {$challengeId}");
+        $this->logger->logInfo("Challenge template created with ID: $challengeId");
         return $challengeId;
     }
 
@@ -451,8 +540,7 @@ class CtfCreationHandler
             $vmName = $vm['name'];
 
             $stmt = $this->pdo->prepare("
-                SELECT proxmox_filename FROM disk_files 
-                WHERE display_name = :filename AND user_id = :user_id
+                SELECT get_proxmox_filename_for_user_disk_file(:user_id, :filename) AS proxmox_filename
             ");
             $stmt->execute([
                 'filename' => $vm['ova_name'],
@@ -461,18 +549,18 @@ class CtfCreationHandler
             $proxmoxFilename = $stmt->fetchColumn();
 
             if (!$proxmoxFilename) {
-                logError("Invalid OVA file reference by user {$this->userId}: " . $vm['ova_name']);
-                throw new RuntimeException("Invalid OVA file reference for VM: {$vmName}", 400);
+                $this->logger->logError("Invalid OVA file reference by user $this->userId: " . $vm['ova_name']);
+                throw new CustomException("Invalid OVA file reference for VM: $vmName", 400);
             }
 
             $stmt = $this->pdo->prepare("
-                INSERT INTO machine_templates (
-                    challenge_template_id, name, disk_file_path, 
-                    cores, ram_gb
-                ) VALUES (
-                    :challenge_id, :name, :ova_file_path, 
-                    :cores, :ram_gb
-                ) RETURNING id
+                SELECT create_machine_template(
+                    :challenge_id,
+                    :name,
+                    :ova_file_path,
+                    :cores,
+                    :ram_gb
+                ) AS id
             ");
 
             $stmt->execute([
@@ -487,10 +575,9 @@ class CtfCreationHandler
 
             if (!empty($vm['domain_name'])) {
                 $stmt = $this->pdo->prepare("
-                    INSERT INTO domain_templates (
-                        machine_template_id, domain_name
-                    ) VALUES (
-                        :machine_id, :domain_name
+                    SELECT create_domain_template(
+                        :machine_id,
+                        :domain_name
                     )
                 ");
 
@@ -510,24 +597,25 @@ class CtfCreationHandler
             $subnetName = $subnet['name'];
 
             $stmt = $this->pdo->prepare("
-                INSERT INTO network_templates (
-                    name, accessible, is_dmz
-                ) VALUES (
-                    :name, :accessible, :is_dmz
-                ) RETURNING id
+                SELECT create_network_template(
+                    :name,
+                    :accessible,
+                    :is_dmz,
+                    :challenge_id
+                ) AS id
             ");
 
             $stmt->bindValue(':name', $subnetName, PDO::PARAM_STR);
             $stmt->bindValue(':accessible', (bool)($subnet['accessible'] ?? false), PDO::PARAM_BOOL);
             $stmt->bindValue(':is_dmz', (bool)($subnet['dmz'] ?? false), PDO::PARAM_BOOL);
+            $stmt->bindValue(':challenge_id', $challengeId, PDO::PARAM_INT);
 
             $stmt->execute();
             $networkId = $stmt->fetchColumn();
 
             foreach ($subnet['attached_vms'] as $vmName) {
                 $stmt = $this->pdo->prepare("
-                    SELECT id FROM machine_templates 
-                    WHERE name = :vm_name AND challenge_template_id = :challenge_id
+                    SELECT get_machine_template_id_by_name_and_challenge_id(:vm_name, :challenge_id) AS id
                 ");
                 $stmt->execute([
                     'vm_name' => $vmName,
@@ -536,15 +624,14 @@ class CtfCreationHandler
                 $machineId = $stmt->fetchColumn();
 
                 if (!$machineId) {
-                    logError("Machine template not found for VM {$vmName} in challenge {$challengeId}");
-                    throw new RuntimeException("Machine template '{$vmName}' not found for this challenge");
+                    $this->logger->logError("Machine template not found for VM $vmName in challenge $challengeId");
+                    throw new CustomException("Machine template '$vmName' not found for this challenge");
                 }
 
                 $stmt = $this->pdo->prepare("
-                    INSERT INTO network_connection_templates (
-                        machine_template_id, network_template_id
-                    ) VALUES (
-                        :machine_id, :network_id
+                    SELECT create_network_connection_template(
+                        :machine_id,
+                        :network_id
                     )
                 ");
                 $stmt->execute([
@@ -561,10 +648,12 @@ class CtfCreationHandler
 
         foreach ($flags as $flag) {
             $stmt = $this->pdo->prepare("
-                INSERT INTO challenge_flags (
-                    challenge_template_id, flag, description, points, order_index
-                ) VALUES (
-                    :challenge_id, :flag, :description, :points, :order_index
+                SELECT create_challenge_flag(
+                    :challenge_id,
+                    :flag,
+                    :description,
+                    :points,
+                    :order_index
                 )
             ");
 
@@ -584,10 +673,11 @@ class CtfCreationHandler
 
         foreach ($hints as $hint) {
             $stmt = $this->pdo->prepare("
-                INSERT INTO challenge_hints (
-                    challenge_template_id, hint_text, unlock_points, order_index
-                ) VALUES (
-                    :challenge_id, :hint_text, :unlock_points, :order_index
+                SELECT create_challenge_hint(
+                    :challenge_id,
+                    :hint_text,
+                    :unlock_points,
+                    :order_index
                 )
             ");
 
@@ -602,20 +692,20 @@ class CtfCreationHandler
 
     private function importMachineTemplates(int $challengeId): void
     {
-        $response = makeBackendRequest(
+        $response = $this->curlHelper->makeBackendRequest(
             '/import-machine-templates',
             'POST',
-            getBackendHeaders(),
+            $this->authHelper->getBackendHeaders(),
             ['challenge_template_id' => $challengeId]
         );
 
         if (!$response['success']) {
-            logError("Failed to import machine templates for challenge {$challengeId}. Response: " . json_encode($response));
+            $this->logger->logError("Failed to import machine templates for challenge $challengeId. Response: " . json_encode($response));
             $this->revertChallengeCreation($challengeId);
-            throw new RuntimeException('Failed to import machine templates', 500);
+            throw new CustomException('Failed to import machine templates', 500);
         }
 
-        logDebug("Successfully imported machine templates for challenge {$challengeId}");
+        $this->logger->logDebug("Successfully imported machine templates for challenge $challengeId");
     }
 
     private function revertChallengeCreation(int $challengeId): void
@@ -623,45 +713,23 @@ class CtfCreationHandler
         try {
             $this->pdo->beginTransaction();
 
-            $flagsDeleted = $this->pdo->prepare("DELETE FROM challenge_flags WHERE challenge_template_id = ?")
-                ->execute([$challengeId]);
-
-            $hintsDeleted = $this->pdo->prepare("DELETE FROM challenge_hints WHERE challenge_template_id = ?")
-                ->execute([$challengeId]);
-
-            $stmt = $this->pdo->prepare("SELECT id FROM machine_templates WHERE challenge_template_id = ?");
-            $stmt->execute([$challengeId]);
-            $machineIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-            if (!empty($machineIds)) {
-                $placeholders = implode(',', array_fill(0, count($machineIds), '?'));
-                $connectionsDeleted = $this->pdo->prepare("DELETE FROM network_connection_templates WHERE machine_template_id IN ({$placeholders})")
-                    ->execute($machineIds);
-
-                $domainsDeleted = $this->pdo->prepare("DELETE FROM domain_templates WHERE machine_template_id IN ({$placeholders})")
-                    ->execute($machineIds);
-
-                $machinesDeleted = $this->pdo->prepare("DELETE FROM machine_templates WHERE id IN ({$placeholders})")
-                    ->execute($machineIds);
-            }
-
-            $networksDeleted = $this->pdo->prepare("DELETE FROM network_templates WHERE id IN (
-                SELECT network_template_id FROM network_connection_templates 
-                WHERE machine_template_id IN (
-                    SELECT id FROM machine_templates WHERE challenge_template_id = ?
-                )
-            )")->execute([$challengeId]);
-
-            $challengeDeleted = $this->pdo->prepare("DELETE FROM challenge_templates WHERE id = ?")
-                ->execute([$challengeId]);
+            $this->pdo->prepare("SELECT delete_challenge_template(
+                :challenge_id
+            )")
+                ->execute(['challenge_id' => $challengeId]);
 
             $this->pdo->commit();
-            logInfo("Successfully reverted challenge creation for ID: {$challengeId}");
+            $this->logger->logInfo("Successfully reverted challenge creation for ID: $challengeId");
+        } catch (CustomException $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            $this->logger->logError("Failed to revert challenge creation for ID $challengeId: " . $e->getMessage());
         } catch (Exception $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
             }
-            logError("Failed to revert challenge creation for ID {$challengeId}: " . $e->getMessage());
+            $this->logger->logError("Unexpected error while reverting challenge creation for ID $challengeId: " . $e->getMessage());
         }
     }
 
@@ -673,17 +741,14 @@ class CtfCreationHandler
                     id,
                     display_name AS name,
                     upload_date AS date
-                FROM disk_files
-                WHERE user_id = :user_id
-                ORDER BY upload_date DESC
+                FROM get_user_available_disk_files(:user_id)
             ");
 
             $stmt->execute(['user_id' => $this->userId]);
-            $ovas = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return $ovas;
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
-            logError("Error fetching OVAs for user {$this->userId}: " . $e->getMessage());
-            throw new RuntimeException('Could not retrieve OVAs', 500);
+            $this->logger->logError("Error fetching OVAs for user $this->userId: " . $e->getMessage());
+            throw new CustomException('Could not retrieve OVAs', 500);
         }
     }
 
@@ -691,7 +756,7 @@ class CtfCreationHandler
     {
         foreach ($subnets as $subnet) {
             if (empty($subnet['attached_vms'])) {
-                throw new RuntimeException(
+                throw new CustomException(
                     "Subnet '{$subnet['name']}' has no attached VMs. Remove it or add VMs."
                 );
             }
@@ -723,7 +788,7 @@ class CtfCreationHandler
         }
 
         if (!empty($unreachableVms)) {
-            throw new RuntimeException(
+            throw new CustomException(
                 "Unreachable VMs detected (no path to public subnets): " .
                 implode(', ', $unreachableVms)
             );
@@ -741,8 +806,8 @@ class CtfCreationHandler
             }
 
             if ($onlyHere && !($subnet['accessible'] ?? false)) {
-                throw new RuntimeException(
-                    "Subnet '{$subnetName}' is not reachable and contains only VMs that are exclusively in it. These VMs would be isolated."
+                throw new CustomException(
+                    "Subnet '$subnetName' is not reachable and contains only VMs that are exclusively in it. These VMs would be isolated."
                 );
             }
         }
@@ -785,9 +850,9 @@ class CtfCreationHandler
         $errorMessage = $code >= 500 ? 'An internal server error occurred' : $e->getMessage();
 
         if ($code >= 500) {
-            logError("Internal error : " . $e->getMessage());
+            $this->logger->logError("Internal error : " . $e->getMessage());
         } else {
-            logWarning("CTF creation error: " . $e->getMessage());
+            $this->logger->logWarning("CTF creation error: " . $e->getMessage());
         }
 
         http_response_code($code);
@@ -796,17 +861,27 @@ class CtfCreationHandler
             'message' => $errorMessage,
             'redirect' => $code === 401 ? '/login' : null
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new CtfCreationHandler($config, $generalConfig);
+    $config = require __DIR__ . '/../config/backend.config.php';
+    $system = new SystemWrapper();
+    $generalConfig = json_decode($system->file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+
+    $handler = new CtfCreationHandler(config: $config, generalConfig: $generalConfig);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in create-ctf endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in create-ctf endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -817,4 +892,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in create-ctf endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

@@ -124,7 +124,7 @@ class CTFExplorer {
         this.paginationContainer.style.display = this.totalPages <= 1 ? 'none' : 'flex';
 
         if (this.totalPages > 1) {
-            document.querySelector('.page-number').textContent = `Page ${this.currentPage} of ${this.totalPages}`;
+            document.querySelector('.page-info').textContent = `Page ${this.currentPage} of ${this.totalPages}`;
         }
     }
 

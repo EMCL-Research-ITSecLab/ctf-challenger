@@ -76,6 +76,12 @@
     color: rgba(var(--color-text-rgb), 0.6);
 }
 
+.file-cloud {
+    font-size: 0.8rem;
+    color: var(--color-danger) !important;
+    margin-top: 20px !important;
+}
+
 /* ===== UPLOAD FORM ===== */
 .upload-form {
     padding: 30px;

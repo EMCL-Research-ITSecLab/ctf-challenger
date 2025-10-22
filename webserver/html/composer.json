@@ -1,0 +1,16 @@
+{
+  "name": "ctf-challenger/webserver",
+  "require": {
+    "vlucas/phpdotenv": "*",
+    "phpunit/phpunit": "*",
+    "brianium/paratest": "*",
+    "testcontainers/testcontainers": "*",
+    "ext-pdo": "*",
+    "ext-curl": "*",
+    "ext-simplexml": "*",
+    "ext-libxml": "*"
+  },
+    "autoload": {
+        "classmap": ["includes/", "backend/", "tests/", "interfaces/", "mocks/"]
+    }
+}

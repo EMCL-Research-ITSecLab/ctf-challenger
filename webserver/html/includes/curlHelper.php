@@ -1,101 +1,114 @@
 <?php
-require __DIR__ . '/../vendor/autoload.php';
+declare(strict_types=1);
 
-$dotenv = Dotenv\Dotenv::createImmutable("/var/www");
-$dotenv->load();
+require_once __DIR__ . '/../vendor/autoload.php';
 
-function makeCurlRequest($endpoint, $method = 'GET', $headers = [], $postFields = null)
+class CurlHelper implements ICurlHelper
 {
-    $baseUrl = 'https://' . $_ENV['PROXMOX_HOSTNAME'];
-    if (isset($_ENV['PROXMOX_PORT'])) {
-        $baseUrl .= ":" . $_ENV['PROXMOX_PORT'];
+    private IEnv $env;
+
+    private string $route;
+
+    public function __construct(IEnv $env)
+    {
+        $this->env = $env;
+        $this->route = "/curlHelper";
     }
 
-    $url = $baseUrl . '/' . ltrim($endpoint, '/');
-
-    $ch = curl_init($url);
-    $defaultOptions = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_HTTPHEADER => $headers
-    ];
-
-    if ($method === 'POST') {
-        if ($postFields !== null) {
-            $defaultOptions[CURLOPT_POST] = true;
-            $defaultOptions[CURLOPT_POSTFIELDS] = $postFields;
-        } else {
-            $defaultOptions[CURLOPT_CUSTOMREQUEST] = 'POST';
+    public function makeCurlRequest($endpoint, $method = 'GET', $headers = [], $postFields = null): bool|array
+    {
+        $baseUrl = 'https://' . $this->env['PROXMOX_HOSTNAME'];
+        if (isset($this->env['PROXMOX_PORT'])) {
+            $baseUrl .= ":" . $this->env['PROXMOX_PORT'];
         }
-    } elseif (in_array($method, ['DELETE', 'PUT', 'GET'])) {
-        $defaultOptions[CURLOPT_CUSTOMREQUEST] = $method;
-    }
 
-    curl_setopt_array($ch, $defaultOptions);
+        $url = $baseUrl . '/' . ltrim($endpoint, '/');
 
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $ch = curl_init($url);
+        $defaultOptions = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_HTTPHEADER => $headers
+        ];
 
-    if ($response === false) {
-        curl_close($ch);
-        return false;
-    }
-
-    curl_close($ch);
-
-    return ['response' => $response, 'http_code' => $httpCode];
-}
-
-function makeBackendRequest($endpoint, $method = 'GET', $headers = [], $postFields = null)
-{
-    $baseUrl = 'https://' . rtrim($_ENV['BACKEND_HOST'], '/');
-    if (isset($_ENV['BACKEND_PORT'])) {
-        $baseUrl .= ":" . $_ENV['BACKEND_PORT'];
-    }
-
-    $url = $baseUrl . '/' . ltrim($endpoint, '/');
-
-    $ch = curl_init($url);
-    $defaultOptions = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_HEADERFUNCTION => function ($curl, $header) use (&$headers) {
-            $parts = explode(':', $header, 2);
-            if (count($parts) === 2) {
-                $headers[strtolower(trim($parts[0]))] = trim($parts[1]);
+        if ($method === 'POST') {
+            if ($postFields !== null) {
+                $defaultOptions[CURLOPT_POST] = true;
+                $defaultOptions[CURLOPT_POSTFIELDS] = $postFields;
+            } else {
+                $defaultOptions[CURLOPT_CUSTOMREQUEST] = 'POST';
             }
-            return strlen($header);
+        } elseif (in_array($method, ['DELETE', 'PUT', 'GET'])) {
+            $defaultOptions[CURLOPT_CUSTOMREQUEST] = $method;
         }
-    ];
 
-    if ($method === 'POST') {
-        if ($postFields !== null) {
-            $defaultOptions[CURLOPT_POST] = true;
-            $defaultOptions[CURLOPT_POSTFIELDS] = is_array($postFields)
-                ? json_encode($postFields)
-                : $postFields;
-        } else {
-            $defaultOptions[CURLOPT_CUSTOMREQUEST] = 'POST';
+        curl_setopt_array($ch, $defaultOptions);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        curl_close($ch);
+        if ($response === false) {
+            $logger = new Logger(route: $this->route);
+            $logger->logDebug("cURL error " . curl_error($ch));
+
+            return false;
         }
-    } elseif (in_array($method, ['DELETE', 'PUT', 'GET'])) {
-        $defaultOptions[CURLOPT_CUSTOMREQUEST] = $method;
+
+        return ['response' => $response, 'http_code' => $httpCode];
     }
 
-    curl_setopt_array($ch, $defaultOptions);
+    public function makeBackendRequest($endpoint, $method = 'GET', $headers = [], $postFields = null): array
+    {
+        $baseUrl = 'https://' . rtrim($this->env['BACKEND_HOST'], '/');
+        if (isset($this->env['BACKEND_PORT'])) {
+            $baseUrl .= ":" . $this->env['BACKEND_PORT'];
+        }
 
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
-    curl_close($ch);
+        $url = $baseUrl . '/' . ltrim($endpoint, '/');
 
-    return [
-        'success' => $response !== false && $httpCode < 400,
-        'response' => $response,
-        'http_code' => $httpCode,
-        'error' => $error ?: null,
-        'headers' => $headers
-    ];
+        $ch = curl_init($url);
+        $defaultOptions = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_HEADERFUNCTION => function ($curl, $header) use (&$headers) {
+                $parts = explode(':', $header, 2);
+                if (count($parts) === 2) {
+                    $headers[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+                return strlen($header);
+            }
+        ];
+
+        if ($method === 'POST') {
+            if ($postFields !== null) {
+                $defaultOptions[CURLOPT_POST] = true;
+                $defaultOptions[CURLOPT_POSTFIELDS] = is_array($postFields)
+                    ? json_encode($postFields)
+                    : $postFields;
+            } else {
+                $defaultOptions[CURLOPT_CUSTOMREQUEST] = 'POST';
+            }
+        } elseif (in_array($method, ['DELETE', 'PUT', 'GET'])) {
+            $defaultOptions[CURLOPT_CUSTOMREQUEST] = $method;
+        }
+
+        curl_setopt_array($ch, $defaultOptions);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        return [
+            'success' => $response !== false && $httpCode < 400,
+            'response' => $response,
+            'http_code' => $httpCode,
+            'error' => $error ?: null,
+            'headers' => $headers
+        ];
+    }
 }

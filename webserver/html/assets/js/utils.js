@@ -62,15 +62,7 @@ class MessageManager {
 class ApiClient {
     constructor() {
         this.messageManager = new MessageManager();
-        this.csrfToken = this.getCsrfToken();
         this.publicEndpoints = ['explore', 'header', 'challenge'];
-    }
-
-    getCsrfToken() {
-        return document.cookie
-            .split('; ')
-            .find(row => row.startsWith('csrf_token='))
-            ?.split('=')[1];
     }
 
     isSamePageReferer() {
@@ -110,20 +102,8 @@ class ApiClient {
             const base = filename.replace(/\.php$/, '');
             const isPublicEndpoint = this.publicEndpoints.includes(base);
 
-            if (!isPublicEndpoint && !this.csrfToken) {
-                const error = new Error('Session expired. Please log in again.');
-                if (this.isSamePageReferer()) {
-                    this.messageManager.showError(error.message);
-                    setTimeout(() => window.location.href = '/login', 1500);
-                } else {
-                    window.location.href = '/login';
-                }
-                return null;
-            }
-
             const headers = {
                 ...(options.headers || {}),
-                ...({'X-CSRF-Token': this.csrfToken})
             };
 
             const response = await fetch(url, {

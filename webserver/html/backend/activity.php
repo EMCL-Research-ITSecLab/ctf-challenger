@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-$config = require __DIR__ . '/../config/backend.config.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class ActivitiesHandler
 {
@@ -18,284 +13,187 @@ class ActivitiesHandler
     private string $rangeFilter;
     private string $categoryFilter;
     private array $config;
+    private string $route;
 
-    public function __construct(array $config)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private ICookie $cookie;
+
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $config,
+
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->cookie = $cookie;
+        $this->route = "/activity";
+
+        $this->logger = $logger ?? new Logger(route: $this->route,system: $system);
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        
+
         $this->config = $config;
         $this->initSession();
         $this->validateRequest();
-        $this->pdo = getPDO();
-        $this->userId = $_SESSION['user_id'];
+        $this->pdo = $this->databaseHelper->getPDO();
+        $this->userId = $this->session['user_id'];
         $this->parseInputParameters();
-        logDebug("Initialized ActivitiesHandler for user ID: {$this->userId}");
+        $this->logger->logDebug("Initialized ActivitiesHandler for user ID: $this->userId");
     }
 
-    private function initSession()
+    /**
+     * @throws Exception
+     */
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
 
-        if (!validate_session()) {
-            logWarning('Unauthorized access attempt to activities route');
-            throw new Exception('Unauthorized', 401);
+        if (!$this->securityHelper->validateSession()) {
+            $this->logger->logWarning('Unauthorized access attempt to activities route');
+            throw new CustomException('Unauthorized', 401);
         }
     }
 
-    private function validateRequest()
+    /**
+     * @throws Exception
+     */
+    private function validateRequest(): void
     {
-        $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        if (!validate_csrf_token($csrfToken)) {
-            logWarning('Invalid CSRF token attempt from user ID: ' . ($_SESSION['user_id'] ?? 'unknown'));
-            throw new Exception('Invalid CSRF token', 403);
+        $csrfToken = $this->cookie['csrf_token'] ?? '';
+        if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+            $this->logger->logWarning('Invalid CSRF token attempt from user ID: ' . ($this->session['user_id'] ?? 'unknown'));
+            throw new CustomException('Invalid CSRF token', 403);
         }
     }
 
-    private function parseInputParameters()
+    /**
+     * @throws Exception
+     */
+    private function parseInputParameters(): void
     {
-        $this->page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT, [
-            'options' => ['default' => 1, 'min_range' => 1]
-        ]);
+        $this->page = (int)$this->get['page'] ?? 1;
+        $this->page = max(1, $this->page);
 
-        $this->typeFilter = $_GET['type'] ?? 'all';
+        $this->typeFilter = $this->get['type'] ?? 'all';
         if (!in_array($this->typeFilter, $this->config['filters']['ACTIVITY_TYPES'])) {
-            logWarning('Invalid type filter provided: ' . $this->typeFilter);
-            throw new Exception('Invalid activity type filter', 400);
+            $this->logger->logWarning('Invalid type filter provided: ' . $this->typeFilter);
+            throw new CustomException('Invalid activity type filter', 400);
         }
 
-        $this->rangeFilter = $_GET['range'] ?? 'all';
+        $this->rangeFilter = $this->get['range'] ?? 'all';
         if (!in_array($this->rangeFilter, $this->config['filters']['ACTIVITY_RANGES'])) {
-            logWarning('Invalid range filter provided: ' . $this->rangeFilter);
-            throw new Exception('Invalid date range filter', 400);
+            $this->logger->logWarning('Invalid range filter provided: ' . $this->rangeFilter);
+            throw new CustomException('Invalid date range filter', 400);
         }
 
-        $this->categoryFilter = $_GET['category'] ?? 'all';
+        $this->categoryFilter = $this->get['category'] ?? 'all';
         if (!in_array($this->categoryFilter, $this->config['filters']['CHALLENGE_CATEGORIES'])) {
-            logWarning('Invalid category filter provided: ' . $this->categoryFilter);
-            throw new Exception('Invalid category filter', 400);
+            $this->logger->logWarning('Invalid category filter provided: ' . $this->categoryFilter);
+            throw new CustomException('Invalid category filter', 400);
         }
     }
 
-    private function getDateRange()
-    {
-        if ($this->rangeFilter === 'all') {
-            return null;
-        }
-
-        $date = new DateTime();
-        switch ($this->rangeFilter) {
-            case 'today':
-                $date->modify('-1 day');
-                break;
-            case 'week':
-                $date->modify('-1 week');
-                break;
-            case 'month':
-                $date->modify('-1 month');
-                break;
-            case 'year':
-                $date->modify('-1 year');
-                break;
-        }
-        return $date->format('Y-m-d H:i:s');
-    }
-
-    public function handleRequest()
+    /**
+     * @throws Exception
+     */
+    public function handleRequest(): void
     {
         try {
-            $dateRange = $this->getDateRange();
-            $params = ['user_id' => $this->userId];
-
-            $queries = $this->buildQueries($dateRange, $params);
-
-            if (empty($queries)) {
-                $this->sendResponse([], 0);
-                return;
-            }
-
-            $combinedQuery = implode(" UNION ALL ", $queries);
-            $total = $this->getTotalCount($combinedQuery, $params);
-            $activities = $this->getPaginatedResults($combinedQuery, $params);
+            $total = $this->getTotalCount();
+            $activities = $this->getPaginatedResults();
 
             $this->sendResponse($activities, $total);
         } catch (PDOException $e) {
-            logError("Database error in activities route: " . $e->getMessage());
-            throw new Exception('Database error occurred', 500);
+            $this->logger->logError("Database error in activities route: " . $e->getMessage());
+            throw new CustomException('Database error occurred', 500);
         }
     }
 
-    private function buildQueries($dateRange, &$params)
+    private function getTotalCount(): int
     {
-        $queries = [];
+        $stmt = $this->pdo->prepare("
+            SELECT get_user_activities_total_count(
+                :user_id,
+                :category_filter,
+                :type_filter,
+                :date_range
+            ) AS total_count
+        ");
 
-        if (in_array($this->typeFilter, ['all', 'solved', 'failed', 'active'])) {
-            $queries[] = $this->buildChallengeQuery($dateRange, $params);
-        }
-
-        if (in_array($this->typeFilter, ['all', 'badges'])) {
-            $queries[] = $this->buildBadgeQuery($dateRange, $params);
-        }
-
-        return $queries;
-    }
-
-    private function buildChallengeQuery($dateRange, &$params)
-    {
-        $query = "
-        WITH flag_counts AS (
-            SELECT 
-                challenge_template_id, 
-                COUNT(id) AS total_flags
-            FROM challenge_flags
-            GROUP BY challenge_template_id
-        ),
-        user_flag_submissions AS (
-            SELECT 
-                cc.challenge_template_id,
-                cc.id AS completion_id,
-                cc.flag_id,
-                cc.completed_at,
-                ROW_NUMBER() OVER (
-                    PARTITION BY cc.challenge_template_id 
-                    ORDER BY cc.completed_at DESC
-                ) AS submission_rank,
-                COUNT(cf.id) OVER (
-                    PARTITION BY cc.challenge_template_id
-                ) AS user_submitted_flags
-            FROM completed_challenges cc
-            JOIN challenge_flags cf ON cc.flag_id = cf.id
-            WHERE cc.user_id = :user_id
-        ),
-        challenge_attempts AS (
-            SELECT 
-                cc.id,
-                cc.challenge_template_id,
-                cc.started_at,
-                cc.completed_at,
-                cc.flag_id,
-                ct.name,
-                ct.category,
-                cf.points,
-                ROW_NUMBER() OVER (
-                    PARTITION BY cc.challenge_template_id 
-                    ORDER BY cc.started_at
-                ) AS attempt_number,
-                CASE
-                    WHEN ufs.submission_rank = 1 AND ufs.user_submitted_flags = fc.total_flags THEN 'solved'
-                    WHEN cc.flag_id IS NOT NULL THEN 'flag_submitted'
-                    WHEN cc.completed_at IS NOT NULL AND cc.flag_id IS NULL THEN 'failed'
-                    ELSE 'active'
-                END AS status,
-                CASE
-                    WHEN cc.completed_at IS NOT NULL THEN cc.completed_at
-                    ELSE cc.started_at
-                END AS activity_date
-            FROM completed_challenges cc
-            JOIN challenge_templates ct ON ct.id = cc.challenge_template_id
-            LEFT JOIN challenge_flags cf ON cf.id = cc.flag_id
-            LEFT JOIN flag_counts fc ON fc.challenge_template_id = cc.challenge_template_id
-            LEFT JOIN user_flag_submissions ufs ON ufs.completion_id = cc.id
-            WHERE cc.user_id = :user_id
-        )
-        SELECT
-            'challenge' AS activity_type,
-            challenge_template_id AS item_id,
-            name AS item_name,
-            category,
-            COALESCE(points, 0) AS points,
-            status = 'solved' AS solved,
-            attempt_number,
-            started_at,
-            completed_at,
-            status,
-            activity_date,
-            NULL AS icon,
-            NULL AS color,
-            NULL AS description,
-            'challenge' AS item_type,
-            flag_id
-        FROM challenge_attempts
-        WHERE 1=1";
-
-        if ($this->typeFilter === 'solved') {
-            $query .= " AND status = 'solved'";
-        } elseif ($this->typeFilter === 'failed') {
-            $query .= " AND status = 'failed'";
-        } elseif ($this->typeFilter === 'active') {
-            $query .= " AND status = 'active'";
-        }
-
-        if ($this->categoryFilter !== 'all') {
-            $query .= " AND category = :category";
-            $params['category'] = $this->categoryFilter;
-        }
-
-        if ($dateRange) {
-            $query .= " AND activity_date >= :date_range";
-            $params['date_range'] = $dateRange;
-        }
-
-        return $query;
-    }
-
-    private function buildBadgeQuery($dateRange, &$params)
-    {
-        $query = "SELECT 
-            'badge' AS activity_type,
-            b.id AS item_id,
-            b.name AS item_name,
-            NULL AS category,
-            NULL AS points,
-            true AS solved,
-            1 AS attempt_number,
-            ub.earned_at AS started_at,
-            ub.earned_at AS completed_at,
-            'badge' AS status,
-            ub.earned_at AS activity_date,
-            b.icon,
-            b.color,
-            b.description,
-            'badge' AS item_type,
-            NULL AS flag_id
-        FROM user_badges ub
-        JOIN badges b ON b.id = ub.badge_id
-        WHERE ub.user_id = :user_id";
-
-        if ($dateRange) {
-            $query .= " AND ub.earned_at >= :date_range_badge";
-            $params['date_range_badge'] = $dateRange;
-        }
-
-        return $query;
-    }
-
-    private function getTotalCount($query, $params)
-    {
-        $countQuery = "SELECT COUNT(*) FROM ($query) AS combined";
-        $stmt = $this->pdo->prepare($countQuery);
-
-        foreach ($params as $key => $val) {
-            $stmt->bindValue($key, $val);
-        }
+        $stmt->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
+        $stmt->bindValue(':category_filter', $this->categoryFilter !== 'all' ? $this->categoryFilter : null);
+        $stmt->bindValue(':type_filter', $this->typeFilter !== 'all' ? $this->typeFilter : null);
+        $stmt->bindValue(':date_range', $this->rangeFilter !== 'all' ? $this->rangeFilter : null);
 
         $stmt->execute();
+
         return $stmt->fetchColumn();
     }
 
-    private function getPaginatedResults($query, $params)
+    private function getPaginatedResults(): array
     {
         $offset = ($this->page - 1) * $this->perPage;
-        $finalQuery = "$query ORDER BY activity_date DESC LIMIT :limit OFFSET :offset";
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                activity_type,
+                item_id,
+                item_name,
+                category,
+                points,
+                solved,
+                attempt_number,
+                started_at,
+                completed_at,
+                status,
+                activity_date,
+                icon,
+                color,
+                description,
+                item_type,
+                flag_id
+            FROM get_user_activities(
+                :user_id,
+                :category_filter,
+                :type_filter,
+                :date_range,
+                :limit,
+                :offset
+            )
+        ");
 
-        $stmt = $this->pdo->prepare($finalQuery);
-
-        foreach ($params as $key => $val) {
-            $stmt->bindValue($key, $val);
-        }
-
+        $stmt->bindValue(':user_id', $this->userId, PDO::PARAM_INT);
+        $stmt->bindValue(':category_filter', $this->categoryFilter !== 'all' ? $this->categoryFilter : null);
+        $stmt->bindValue(':type_filter', $this->typeFilter !== 'all' ? $this->typeFilter : null);
+        $stmt->bindValue(':date_range', $this->rangeFilter !== 'all' ? $this->rangeFilter : null);
         $stmt->bindValue(':limit', $this->perPage, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+
         $stmt->execute();
 
         $activities = [];
+
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $activities[] = $this->formatActivity($row);
         }
@@ -303,7 +201,7 @@ class ActivitiesHandler
         return $activities;
     }
 
-    private function formatActivity($row)
+    private function formatActivity($row): array
     {
         $activity = [
             'type' => $row['status'],
@@ -346,7 +244,7 @@ class ActivitiesHandler
         return $activity;
     }
 
-    private function sendResponse($activities, $total)
+    private function sendResponse($activities, $total): void
     {
         echo json_encode([
             'success' => true,
@@ -359,7 +257,7 @@ class ActivitiesHandler
         ]);
     }
 
-    private function formatTimeAgo($datetime)
+    private function formatTimeAgo($datetime): string
     {
         if (!$datetime) return 'Recently';
 
@@ -374,13 +272,16 @@ class ActivitiesHandler
             if ($diff->h > 0) return $diff->h . ' hour' . ($diff->h > 1 ? 's' : '') . ' ago';
             if ($diff->i > 0) return $diff->i . ' minute' . ($diff->i > 1 ? 's' : '') . ' ago';
             return 'Just now';
+        } catch (CustomException $e) {
+            $this->logger->logError("Error formatting time ago: " . $e->getMessage());
+            return 'Recently';
         } catch (Exception $e) {
-            logError("Error formatting time ago: " . $e->getMessage());
+            $this->logger->logError("Unexpected error: " . $e->getMessage());
             return 'Recently';
         }
     }
 
-    private function formatDuration($seconds)
+    private function formatDuration($seconds): string
     {
         if ($seconds < 60) return round($seconds) . 's';
         if ($seconds < 3600) return round($seconds / 60) . 'm';
@@ -389,13 +290,22 @@ class ActivitiesHandler
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new ActivitiesHandler($config);
+    header('Content-Type: application/json');
+    $config = require __DIR__ . '/../config/backend.config.php';
+
+    $handler = new ActivitiesHandler(config: $config);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in activity endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in activity endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -406,4 +316,15 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in activity endpoint: " . $e->getMessage());
+    $response = [
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ];
+    echo json_encode($response);
 }
+
+// @codeCoverageIgnoreEnd

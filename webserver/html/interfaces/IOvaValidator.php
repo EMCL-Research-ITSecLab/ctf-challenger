@@ -1,0 +1,10 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+interface IOvaValidator
+{
+    public function __construct(array $config);
+    public function validate(string $ovaPath): void;
+}

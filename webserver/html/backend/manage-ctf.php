@@ -1,14 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-require_once __DIR__ . '/../includes/curlHelper.php';
-require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/challengeHelper.php';
-$config = require __DIR__ . '/../config/backend.config.php';
-$generalConfig = json_decode(file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class CTFManagementHandler
 {
@@ -18,67 +11,127 @@ class CTFManagementHandler
     private array $inputData;
     private array $config;
     private array $generalConfig;
+    private $route;
 
-    public function __construct(array $config, array $generalConfig)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+    private IAuthHelper $authHelper;
+    private ICurlHelper $curlHelper;
+    private IChallengeHelper $challengeHelper;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private IPost $post;
+    private ICookie $cookie;
+    
+    private ISystem $system;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $config,
+        array $generalConfig,
+        
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+        IAuthHelper $authHelper = null,
+        ICurlHelper $curlHelper = null,
+        IChallengeHelper $challengeHelper = null,
+        
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+        IPost $post = new Post(),
+        
+        ISystem $system = new SystemWrapper(),
+        IEnv $env = new Env(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->post = $post;
+        $this->cookie = $cookie;
+        $this->route = "/manage-ctf";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+        $this->authHelper = $authHelper ?? new AuthHelper($logger, $system, $env);
+        $this->curlHelper = $curlHelper ?? new CurlHelper($env);
+        $this->challengeHelper = $challengeHelper ?? new ChallengeHelper();
+        
+        $this->system = $system;
+
         $this->config = $config;
         $this->generalConfig = $generalConfig;
         header('Content-Type: application/json');
-        $this->pdo = getPDO();
+        $this->pdo = $this->databaseHelper->getPDO();
         $this->initSession();
         $this->validateAccess();
-        $this->userId = $_SESSION['user_id'];
-        $this->method = $_SERVER['REQUEST_METHOD'];
+        $this->userId = $this->session['user_id'];
+        $this->method = $this->server['REQUEST_METHOD'];
         $this->inputData = $this->parseInputData();
 
-        logDebug("Initialized CTFManagementHandler for user ID: {$this->userId}");
+        $this->logger->logDebug("Initialized CTFManagementHandler for user ID: $this->userId");
     }
 
     private function initSession(): void
     {
         try {
-            init_secure_session();
+            $this->securityHelper->initSecureSession();
+        } catch (CustomException $e) {
+            $this->logger->logError("Session initialization failed: " . $e->getMessage());
+            throw new CustomException('Session initialization error', 500);
         } catch (Exception $e) {
-            logError("Session initialization failed: " . $e->getMessage());
-            throw new RuntimeException('Session initialization error', 500);
+            $this->logger->logError("Unexpected error during session initialization: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
     }
 
+    /**
+     * @throws Exception
+     */
     private function validateAccess(): void
     {
-        if (!validate_session()) {
-            logWarning("Unauthorized access attempt to manage CTF - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new RuntimeException('Unauthorized - Please login', 401);
+        if (!$this->securityHelper->validateSession()) {
+            $this->logger->logWarning("Unauthorized access attempt to manage CTF - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Unauthorized - Please login', 401);
         }
 
-        $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        if (!validate_csrf_token($csrfToken)) {
-            logWarning("Invalid CSRF token in manage CTF - User ID: " . ($_SESSION['user_id'] ?? 'unknown') . ", Token: {$csrfToken}");
-            throw new RuntimeException('Invalid CSRF token', 403);
+        $csrfToken = $this->cookie['csrf_token'] ?? '';
+        if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+            $this->logger->logWarning("Invalid CSRF token in manage CTF - User ID: " . ($this->session['user_id'] ?? 'unknown') . ", Token: $csrfToken");
+            throw new CustomException('Invalid CSRF token', 403);
         }
 
-        if (!validate_admin_access($this->pdo)) {
-            logWarning("Non-admin access attempt to manage CTF - User ID: " . ($_SESSION['user_id'] ?? 'unknown'));
-            throw new Exception('Unauthorized - Admin access only', 403);
+        if (!$this->securityHelper->validateAdminAccess($this->pdo)) {
+            $this->logger->logWarning("Non-admin access attempt to manage CTF - User ID: " . ($this->session['user_id'] ?? 'unknown'));
+            throw new CustomException('Unauthorized - Admin access only', 403);
         }
     }
 
     private function parseInputData(): array
     {
         if ($this->method === 'GET') {
-            return $_GET;
+            return $this->get->all();
         }
 
         if ($this->method === 'DELETE') {
-            $data = json_decode(file_get_contents('php://input'), true);
+            $data = json_decode($this->system->file_get_contents('php://input'), true);
             if (json_last_error() !== JSON_ERROR_NONE) {
-                logError("Invalid JSON in CTF deletion - User ID: {$this->userId}");
-                throw new RuntimeException('Invalid JSON data', 400);
+                $this->logger->logError("Invalid JSON in CTF deletion - User ID: $this->userId");
+                throw new CustomException('Invalid JSON data', 400);
             }
             return $data;
         }
 
-        return $_POST;
+        return $this->post->all();
     }
 
     public function handleRequest(): void
@@ -95,11 +148,15 @@ class CTFManagementHandler
                     $this->handleDeleteRequest();
                     break;
                 default:
-                    logWarning("Invalid method in manage CTF - Method: {$this->method}, User ID: {$this->userId}");
-                    throw new RuntimeException('Method not allowed', 405);
+                    $this->logger->logWarning("Invalid method in manage CTF - Method: $this->method, User ID: $this->userId");
+                    throw new CustomException('Method not allowed', 405);
             }
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->handleError($e);
+        } catch (Exception $e) {
+            // most likely not reachable, gonna leave it here for safety
+            $this->logger->logError("Unexpected error in CTF management: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            $this->handleError(new Exception('Internal Server Error', 500));
         }
     }
 
@@ -135,7 +192,7 @@ class CTFManagementHandler
    {
        if (!isset($this->inputData['id'])) {
            echo json_encode(['success' => false, 'message' => 'Challenge ID is required']);
-           exit;
+           defined('PHPUNIT_RUNNING') || exit;
        }
 
        $challengeId = (int)$this->inputData['id'];
@@ -145,28 +202,22 @@ class CTFManagementHandler
 
        try {
            $stmt = $this->pdo->prepare("
-            SELECT creator_id 
-            FROM challenge_templates 
-            WHERE id = ?
-        ");
-           $stmt->execute([$challengeId]);
+                SELECT get_creator_id_by_challenge_id(:challenge_id) AS creator_id
+            ");
+           $stmt->execute(['challenge_id' => $challengeId]);
            $creatorId = $stmt->fetchColumn();
 
            if ($creatorId !== $this->userId) {
                echo json_encode(['success' => false, 'message' => 'You are not authorized to view this leaderboard']);
-               exit;
+               defined('PHPUNIT_RUNNING') || exit;
            }
 
-           $leaderboard = getChallengeLeaderboard($this->pdo, $challengeId, $limit, $offset);
+           $leaderboard = $this->challengeHelper->getChallengeLeaderboard($this->pdo, $challengeId, $limit, $offset);
 
            $stmt = $this->pdo->prepare("
-            SELECT COUNT(DISTINCT cc.user_id) AS total 
-            FROM completed_challenges cc
-            JOIN challenge_flags cf ON cc.flag_id = cf.id
-            WHERE cc.challenge_template_id = ?
-            AND cf.points > 0
-        ");
-           $stmt->execute([$challengeId]);
+                SELECT get_total_leaderboard_entries_for_author(:challenge_id)
+            ");
+           $stmt->execute(['challenge_id' => $challengeId]);
            $total = $stmt->fetchColumn();
 
            echo json_encode([
@@ -174,7 +225,7 @@ class CTFManagementHandler
                'leaderboard' => $leaderboard,
                'total_entries' => $total
            ]);
-       } catch (PDOException $e) {
+       } catch (PDOException) {
            echo json_encode(['success' => false, 'message' => 'Error getting leaderboard']);
        }
    }
@@ -191,7 +242,7 @@ class CTFManagementHandler
                 $this->handleRestoreRequest();
                 break;
             default:
-                throw new RuntimeException('Invalid action', 400);
+                throw new CustomException('Invalid action', 400);
         }
     }
 
@@ -199,28 +250,28 @@ class CTFManagementHandler
     {
         $errors = $this->validateChallengeData();
         if (!empty($errors['errors'])) {
-            logWarning("Validation failed in CTF update - User ID: {$this->userId}, Errors: " . implode(', ', $errors['errors']));
+            $this->logger->logWarning("Validation failed in CTF update - User ID: $this->userId, Errors: " . implode(', ', $errors['errors']));
             http_response_code(400);
             echo json_encode($errors);
-            exit;
+            defined('PHPUNIT_RUNNING') || exit;
         }
 
         $challenge = $this->verifyChallengeOwnershipAndStatus((int)$this->inputData['id']);
 
         if ($challenge['marked_for_deletion'] && !empty($this->inputData['isActive'])) {
-            logWarning("Attempt to activate deleted challenge - ID: {$this->inputData['id']}, User ID: {$this->userId}");
+            $this->logger->logWarning("Attempt to activate deleted challenge - ID: {$this->inputData['id']}, User ID: $this->userId");
             http_response_code(400);
             echo json_encode([
                 'success' => false,
                 'message' => 'Cannot activate a challenge marked for deletion. Restore it first.',
                 'fields' => ['edit-active']
             ]);
-            exit;
+            defined('PHPUNIT_RUNNING') || exit;
         }
 
         $this->updateChallenge();
 
-        logInfo("CTF challenge updated - ID: {$this->inputData['id']}, Name: {$this->inputData['name']}, User ID: {$this->userId}");
+        $this->logger->logInfo("CTF challenge updated - ID: {$this->inputData['id']}, Name: {$this->inputData['name']}, User ID: $this->userId");
 
         echo json_encode([
             'success' => true,
@@ -231,20 +282,20 @@ class CTFManagementHandler
     private function handleRestoreRequest(): void
     {
         if (empty($this->inputData['id'])) {
-            throw new RuntimeException('Challenge ID is required', 400);
+            throw new CustomException('Challenge ID is required', 400);
         }
 
         $challengeId = (int)$this->inputData['id'];
         $challenge = $this->verifyChallengeOwnershipAndStatus($challengeId);
 
         if (!$challenge['marked_for_deletion']) {
-            logWarning("Attempt to restore non-deleted challenge - ID: {$challengeId}, User ID: {$this->userId}");
-            throw new RuntimeException('Challenge is not marked for deletion', 400);
+            $this->logger->logWarning("Attempt to restore non-deleted challenge - ID: $challengeId, User ID: $this->userId");
+            throw new CustomException('Challenge is not marked for deletion', 400);
         }
 
         $this->restoreChallenge($challengeId);
 
-        logInfo("CTF challenge restored - ID: {$challengeId}, User ID: {$this->userId}");
+        $this->logger->logInfo("CTF challenge restored - ID: $challengeId, User ID: $this->userId");
 
         echo json_encode([
             'success' => true,
@@ -265,24 +316,15 @@ class CTFManagementHandler
             $errors['fields'][] = 'edit-name';
         } else {
             $stmt = $this->pdo->prepare("
-            SELECT id FROM challenge_templates 
-            WHERE name = :name 
-            AND creator_id = :user_id
-            " . (isset($input['id']) ? "AND id != :exclude_id" : "")
-            );
+                SELECT get_challenge_template_id_by_name_with_possible_exclude(:name, :exclude_id) AS exists
+            ");
 
-            $params = [
+            $stmt->execute([
                 'name' => $input['name'],
-                'user_id' => $this->userId
-            ];
+                'exclude_id' => isset($input['id']) ? (int)$input['id'] : null
+            ]);
 
-            if (isset($input['id'])) {
-                $params['exclude_id'] = $input['id'];
-            }
-
-            $stmt->execute($params);
-
-            if ($stmt->fetch()) {
+            if ($stmt->fetchColumn()) {
                 $errors['errors'][] = 'A challenge with this name already exists';
                 $errors['fields'][] = 'edit-name';
             }
@@ -322,16 +364,17 @@ class CTFManagementHandler
     private function verifyChallengeOwnershipAndStatus(int $challengeId): array
     {
         $stmt = $this->pdo->prepare("
-        SELECT id, marked_for_deletion 
-        FROM challenge_templates 
-        WHERE id = :id AND creator_id = :user_id
-    ");
+            SELECT
+                id,
+                marked_for_deletion
+            FROM get_challenge_template_data_for_deletion(:user_id, :id)
+        ");
         $stmt->execute(['id' => $challengeId, 'user_id' => $this->userId]);
-        $challenge = $stmt->fetch();
+        $challenge = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$challenge) {
-            logError("Challenge not found or access denied - Challenge ID: {$challengeId}, User ID: {$this->userId}");
-            throw new RuntimeException('Challenge not found or access denied', 404);
+            $this->logger->logError("Challenge not found or access denied - Challenge ID: $challengeId, User ID: $this->userId");
+            throw new CustomException('Challenge not found or access denied', 404);
         }
 
         return $challenge;
@@ -341,7 +384,7 @@ class CTFManagementHandler
     {
         $isActive = (int)filter_var($this->inputData['isActive'], FILTER_VALIDATE_BOOLEAN);
 
-        $stmt = $this->pdo->prepare("SELECT marked_for_deletion FROM challenge_templates WHERE id = :id");
+        $stmt = $this->pdo->prepare("SELECT challenge_template_is_marked_for_deletion(:id) AS marked_for_deletion");
         $stmt->execute(['id' => $this->inputData['id']]);
         $challenge = $stmt->fetch();
 
@@ -350,16 +393,16 @@ class CTFManagementHandler
         }
 
         $stmt = $this->pdo->prepare("
-            UPDATE challenge_templates SET
-                name = :name,
-                description = :description,
-                category = :category,
-                difficulty = :difficulty,
-                hint = :hint,
-                solution = :solution,
-                is_active = :is_active,
-                updated_at = NOW()
-            WHERE id = :id
+            SELECT update_challenge_template(
+                :id,
+                :name,
+                :description,
+                :category,
+                :difficulty,
+                :hint,
+                :solution,
+                :is_active
+            )
         ");
 
         $stmt->execute([
@@ -377,22 +420,22 @@ class CTFManagementHandler
     private function restoreChallenge(int $challengeId): void
     {
         $stmt = $this->pdo->prepare("
-        UPDATE challenge_templates 
-        SET marked_for_deletion = false, 
-            is_active = true
-        WHERE id = :challenge_id
-    ");
+            SELECT restore_challenge_template(:challenge_id)
+        ");
         $stmt->execute(['challenge_id' => $challengeId]);
     }
 
+    /**
+     * @throws Exception
+     */
     private function handleDeleteRequest(): void
     {
         $challengeId = $this->inputData['id'] ?? null;
         $forceDelete = $this->inputData['force'] ?? false;
 
         if (!$challengeId) {
-            logError("Missing challenge ID in deletion - User ID: {$this->userId}");
-            throw new RuntimeException('Challenge ID is required', 400);
+            $this->logger->logError("Missing challenge ID in deletion - User ID: $this->userId");
+            throw new CustomException('Challenge ID is required', 400);
         }
 
         $challenge = $this->verifyChallengeOwnershipForDeletion((int)$challengeId);
@@ -402,20 +445,22 @@ class CTFManagementHandler
     private function verifyChallengeOwnershipForDeletion(int $challengeId): array
     {
         $stmt = $this->pdo->prepare("
-            SELECT id, name FROM challenge_templates 
-            WHERE id = :id AND creator_id = :user_id
+            SELECT id, name FROM verify_challenge_template_ownership_for_deletion(:user_id, :id)
         ");
         $stmt->execute(['id' => $challengeId, 'user_id' => $this->userId]);
         $challenge = $stmt->fetch();
 
         if (!$challenge) {
-            logError("Challenge not found or access denied - Challenge ID: {$challengeId}, User ID: {$this->userId}");
-            throw new RuntimeException('Challenge not found or access denied', 404);
+            $this->logger->logError("Challenge not found or access denied - Challenge ID: $challengeId, User ID: $this->userId");
+            throw new CustomException('Challenge not found or access denied', 404);
         }
 
         return $challenge;
     }
 
+    /**
+     * @throws Exception
+     */
     private function processDeletion(int $challengeId, bool $forceDelete, string $challengeName): void
     {
         $this->pdo->beginTransaction();
@@ -424,10 +469,10 @@ class CTFManagementHandler
             if ($forceDelete) {
                 $this->forceDeleteChallenge($challengeId);
                 $message = 'Challenge and all instances permanently deleted';
-                logInfo("Force deleted challenge - ID: {$challengeId}, Name: '{$challengeName}'");
+                $this->logger->logInfo("Force deleted challenge - ID: $challengeId, Name: '$challengeName'");
             } else {
                 $message = $this->softDeleteChallenge($challengeId);
-                logInfo("Soft deleted challenge - ID: {$challengeId}, Name: '{$challengeName}'");
+                $this->logger->logInfo("Soft deleted challenge - ID: $challengeId, Name: '$challengeName'");
             }
 
             $this->pdo->commit();
@@ -436,10 +481,14 @@ class CTFManagementHandler
                 'success' => true,
                 'message' => $message
             ]);
+        } catch (CustomException $e) {
+            $this->pdo->rollBack();
+            $this->logger->logError("Failed to delete CTF challenge - ID: $challengeId, Name: '$challengeName', Error: " . $e->getMessage());
+            throw $e;
         } catch (Exception $e) {
             $this->pdo->rollBack();
-            logError("Failed to delete CTF challenge - ID: {$challengeId}, Name: '{$challengeName}', Error: " . $e->getMessage());
-            throw $e;
+            $this->logger->logError("Unexpected error during challenge deletion - ID: $challengeId, Name: '$challengeName', Error: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
         }
     }
 
@@ -448,7 +497,6 @@ class CTFManagementHandler
 
         $this->markChallengeForDeletion($challengeId);
         $this->stopRunningInstances($challengeId);
-        $this->deleteCompletedChallenges($challengeId);
         $this->deleteVmTemplates($challengeId);
         $this->deleteRelatedDatabaseEntries($challengeId);
     }
@@ -456,9 +504,7 @@ class CTFManagementHandler
     private function markChallengeForDeletion(int $challengeId): void
     {
         $stmt = $this->pdo->prepare("
-            UPDATE challenge_templates 
-            SET marked_for_deletion = true 
-            WHERE id = :challenge_id
+            SELECT mark_challenge_template_for_deletion(:challenge_id)
         ");
         $stmt->execute(['challenge_id' => $challengeId]);
     }
@@ -466,118 +512,44 @@ class CTFManagementHandler
     private function stopRunningInstances(int $challengeId): void
     {
         $stmt = $this->pdo->prepare("
-            SELECT u.id AS user_id, c.id AS challenge_id
-            FROM users u
-            JOIN challenges c ON u.running_challenge = c.id
-            WHERE c.challenge_template_id = :challenge_id
+            SELECT id, user_id, challenge_id FROM get_running_instances_of_challenge_template(:challenge_id)
         ");
         $stmt->execute(['challenge_id' => $challengeId]);
         $runningInstances = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($runningInstances as $instance) {
-            $response = makeBackendRequest(
+            $response = $this->curlHelper->makeBackendRequest(
                 '/stop-challenge',
                 'POST',
-                getBackendHeaders(),
+                $this->authHelper->getBackendHeaders(),
                 ['user_id' => $instance['user_id']]
             );
 
             if (!$response['success']) {
-                throw new RuntimeException('Failed to stop challenge instance: ' . ($response['error'] ?? $response['response']));
+                throw new CustomException('Failed to stop challenge instance');
             }
         }
     }
 
-    private function deleteCompletedChallenges(int $challengeId): void
-    {
-        $stmt = $this->pdo->prepare("
-            DELETE FROM completed_challenges 
-            WHERE challenge_template_id = :challenge_id
-        ");
-        $stmt->execute(['challenge_id' => $challengeId]);
-    }
-
     private function deleteVmTemplates(int $challengeId): void
     {
-        $response = makeBackendRequest(
+        $response = $this->curlHelper->makeBackendRequest(
             '/delete-machine-templates',
             'POST',
-            getBackendHeaders(),
+            $this->authHelper->getBackendHeaders(),
             ['challenge_id' => $challengeId]
         );
 
         if (!$response['success']) {
-            throw new RuntimeException('Failed to delete VM templates: ' . ($response['error'] ?? $response['response']));
+            throw new CustomException('Failed to delete VM templates');
         }
     }
 
     private function deleteRelatedDatabaseEntries(int $challengeId): void
     {
-        $tables = [
-            'challenge_flags',
-            'challenge_hints',
-            'network_connection_templates',
-            'machine_templates',
-            'network_templates',
-            'challenge_templates'
-        ];
+        $stmt = $this->pdo->prepare("SELECT delete_challenge_template(:challenge_id)");
+        $stmt->execute(['challenge_id' => $challengeId]);
 
-        foreach ($tables as $table) {
-            switch ($table) {
-                case 'network_connection_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM network_connection_templates
-                        WHERE machine_template_id IN (
-                            SELECT id FROM machine_templates 
-                            WHERE challenge_template_id = :challenge_id
-                        )
-                    ");
-                    break;
-
-                case 'machine_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM machine_templates 
-                        WHERE challenge_template_id = :challenge_id
-                    ");
-                    break;
-
-                case 'network_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM network_templates
-                        WHERE id IN (
-                            SELECT nct.network_template_id
-                            FROM network_connection_templates nct
-                            JOIN machine_templates mt ON nct.machine_template_id = mt.id
-                            WHERE mt.challenge_template_id = :challenge_id
-                        )
-                        AND NOT EXISTS (
-                            SELECT 1 FROM network_connection_templates nct2
-                            WHERE nct2.network_template_id = network_templates.id
-                            AND nct2.machine_template_id NOT IN (
-                                SELECT id FROM machine_templates 
-                                WHERE challenge_template_id = :challenge_id
-                            )
-                        )
-                    ");
-                    break;
-
-                case 'challenge_templates':
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM challenge_templates 
-                        WHERE id = :challenge_id
-                    ");
-                    break;
-
-                default:
-                    $stmt = $this->pdo->prepare("
-                        DELETE FROM {$table} 
-                        WHERE challenge_template_id = :challenge_id
-                    ");
-                    break;
-            }
-
-            $stmt->execute(['challenge_id' => $challengeId]);
-        }
     }
 
     private function softDeleteChallenge(int $challengeId): string
@@ -589,7 +561,6 @@ class CTFManagementHandler
             return 'Challenge marked for deletion (will be removed when all instances complete)';
         }
 
-        $this->deleteCompletedChallenges($challengeId);
         $this->deleteVmTemplates($challengeId);
         $this->deleteRelatedDatabaseEntries($challengeId);
         return 'Challenge deleted successfully (no active instances)';
@@ -598,11 +569,7 @@ class CTFManagementHandler
     private function countActiveDeployments(int $challengeId): int
     {
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(c.id) AS active_count
-            FROM challenges c
-            JOIN users u ON u.running_challenge = c.id
-            WHERE c.challenge_template_id = :challenge_id
-            AND u.running_challenge IS NOT NULL
+            SELECT count_active_deployments_of_challenge_template(:challenge_id) AS active_count
         ");
         $stmt->execute(['challenge_id' => $challengeId]);
         return $stmt->fetchColumn();
@@ -611,223 +578,63 @@ class CTFManagementHandler
     private function markChallengeForSoftDeletion(int $challengeId): void
     {
         $stmt = $this->pdo->prepare("
-            UPDATE challenge_templates 
-            SET marked_for_deletion = true, 
-                is_active = false
-            WHERE id = :challenge_id
+            SELECT mark_challenge_template_for_soft_deletion(:challenge_id)
         ");
         $stmt->execute(['challenge_id' => $challengeId]);
     }
 
     private function getChallenges(): array
     {
-        $stmt = $this->pdo->prepare($this->getChallengesQuery());
+        $stmt = $this->pdo->prepare("
+            SELECT
+                id,
+                name,
+                description,
+                category,
+                difficulty,
+                image_path,
+                is_active,
+                created_at,
+                marked_for_deletion,
+                total_deployments,
+                hint,
+                solution,
+                active_deployments,
+                solve_count,
+                avg_completion_minutes
+            FROM get_challenge_templates_for_management(:user_id)
+       ");
         $stmt->execute(['user_id' => $this->userId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    private function getChallengesQuery(): string
-    {
-        return "
-            WITH flag_counts AS (
-                SELECT
-                    challenge_template_id,
-                    COUNT(id) AS total_flags
-                FROM challenge_flags
-                GROUP BY challenge_template_id
-            ),
-            user_flags AS (
-                SELECT
-                    challenge_template_id,
-                    user_id,
-                    flag_id,
-                    MAX(completed_at) AS flag_found_at
-                FROM completed_challenges
-                WHERE flag_id IS NOT NULL AND completed_at IS NOT NULL
-                GROUP BY challenge_template_id, user_id, flag_id
-            ),
-            fully_solved AS (
-                SELECT
-                    uf.challenge_template_id,
-                    uf.user_id,
-                    COUNT(DISTINCT uf.flag_id) AS found_flags,
-                    MAX(uf.flag_found_at) AS last_flag_time
-                FROM user_flags uf
-                GROUP BY uf.challenge_template_id, uf.user_id
-            ),
-            valid_attempts AS (
-                SELECT
-                    cc.challenge_template_id,
-                    cc.user_id,
-                    cc.started_at,
-                    cc.completed_at,
-                    EXTRACT(EPOCH FROM (cc.completed_at - cc.started_at))/60 AS duration_minutes
-                FROM completed_challenges cc
-                WHERE cc.started_at IS NOT NULL AND cc.completed_at IS NOT NULL
-                AND EXTRACT(EPOCH FROM (cc.completed_at - cc.started_at)) > 10
-            ),
-            pre_completion_attempts AS (
-                SELECT
-                    va.challenge_template_id,
-                    va.user_id,
-                    va.started_at,
-                    va.completed_at,
-                    va.duration_minutes
-                FROM valid_attempts va
-                JOIN fully_solved fs ON
-                    fs.challenge_template_id = va.challenge_template_id AND
-                    fs.user_id = va.user_id
-                WHERE va.completed_at <= fs.last_flag_time
-            ),
-            aggregated_times AS (
-                SELECT
-                    challenge_template_id,
-                    user_id,
-                    SUM(duration_minutes) AS total_duration
-                FROM pre_completion_attempts
-                GROUP BY challenge_template_id, user_id
-            ),
-            solved_stats AS (
-                SELECT
-                    challenge_template_id,
-                    COUNT(*) AS solve_count,
-                    ROUND(AVG(total_duration)) AS avg_completion_minutes
-                FROM aggregated_times
-                GROUP BY challenge_template_id
-            ),
-            active_deployments AS (
-                SELECT
-                    c.challenge_template_id,
-                    COUNT(DISTINCT c.id) AS active_count
-                FROM challenges c
-                JOIN users u ON u.running_challenge = c.id
-                WHERE u.running_challenge IS NOT NULL
-                GROUP BY c.challenge_template_id
-            ),
-            real_deployments AS (
-                SELECT
-                    challenge_template_id,
-                    COUNT(*) AS total_count
-                FROM completed_challenges
-                WHERE EXTRACT(EPOCH FROM (completed_at - started_at)) > 10
-                OR completed_at IS NULL
-                GROUP BY challenge_template_id
-            )
-            SELECT
-                ct.id,
-                ct.name,
-                ct.description,
-                ct.category,
-                ct.difficulty,
-                ct.image_path,
-                ct.is_active,
-                ct.created_at,
-                ct.marked_for_deletion,
-                COALESCE(rd.total_count, 0) AS total_deployments,
-                ct.hint,
-                ct.solution,
-                COALESCE(ad.active_count, 0) AS active_deployments,
-                COALESCE(ss.solve_count, 0) AS solve_count,
-                COALESCE(ss.avg_completion_minutes, 0) AS avg_completion_minutes
-            FROM challenge_templates ct
-            LEFT JOIN solved_stats ss ON ss.challenge_template_id = ct.id
-            LEFT JOIN active_deployments ad ON ad.challenge_template_id = ct.id
-            LEFT JOIN real_deployments rd ON rd.challenge_template_id = ct.id
-            WHERE ct.creator_id = :user_id
-            ORDER BY ct.created_at DESC
-        ";
     }
 
     private function getChallengeStats(): array
     {
         $stats = [];
 
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM challenge_templates WHERE creator_id = :user_id");
+        $stmt = $this->pdo->prepare("SELECT get_challenge_template_count_for_user(:user_id) AS total_count");
         $stmt->execute(['user_id' => $this->userId]);
         $stats['total_challenges'] = $stmt->fetchColumn();
 
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(DISTINCT c.id) 
-            FROM challenges c
-            JOIN users u ON u.running_challenge = c.id
-            JOIN challenge_templates ct ON c.challenge_template_id = ct.id
-            WHERE ct.creator_id = :user_id AND u.running_challenge IS NOT NULL
+            SELECT get_active_deployments_of_challenge_templates_by_user(:user_id) AS active_count
         ");
         $stmt->execute(['user_id' => $this->userId]);
         $stats['active_deployments'] = $stmt->fetchColumn();
 
         $stmt = $this->pdo->prepare("
-            SELECT COALESCE(SUM(total_count), 0)
-            FROM (
-                SELECT challenge_template_id, COUNT(*) AS total_count
-                FROM completed_challenges
-                WHERE EXTRACT(EPOCH FROM (completed_at - started_at)) > 2 OR completed_at IS NULL
-                GROUP BY challenge_template_id
-            ) rd
-            JOIN challenge_templates ct ON rd.challenge_template_id = ct.id
-            WHERE ct.creator_id = :user_id
+            SELECT get_total_deployments_of_challenge_templates_by_user(:user_id) AS total_deployments
         ");
         $stmt->execute(['user_id' => $this->userId]);
         $stats['total_deployments'] = $stmt->fetchColumn();
 
-        $stmt = $this->pdo->prepare($this->getAvgCompletionTimeQuery());
+        $stmt = $this->pdo->prepare("
+            SELECT get_average_completion_time_of_challenge_templates_by_user(:user_id) AS avg_minutes
+        ");
         $stmt->execute(['user_id' => $this->userId]);
         $stats['avg_completion_minutes'] = $stmt->fetchColumn();
 
         return $stats;
-    }
-
-    private function getAvgCompletionTimeQuery(): string
-    {
-        return "
-            WITH flag_counts AS (
-                SELECT challenge_template_id, COUNT(*) AS total_flags
-                FROM challenge_flags
-                GROUP BY challenge_template_id
-            ),
-            user_flag_completions AS (
-                SELECT
-                    cc.challenge_template_id,
-                    cc.user_id,
-                    COUNT(DISTINCT cc.flag_id) AS flags_found,
-                    MAX(cc.completed_at) AS last_flag_time
-                FROM completed_challenges cc
-                GROUP BY cc.challenge_template_id, cc.user_id
-            ),
-            successful_users AS (
-                SELECT
-                    ufc.challenge_template_id,
-                    ufc.user_id,
-                    ufc.last_flag_time
-                FROM user_flag_completions ufc
-                JOIN flag_counts fc ON ufc.challenge_template_id = fc.challenge_template_id
-                WHERE ufc.flags_found = fc.total_flags
-            ),
-            valid_sessions AS (
-                SELECT
-                    cc.challenge_template_id,
-                    cc.user_id,
-                    cc.started_at,
-                    cc.completed_at,
-                    EXTRACT(EPOCH FROM (cc.completed_at - cc.started_at))/60 AS duration_minutes,
-                    su.last_flag_time
-                FROM completed_challenges cc
-                JOIN successful_users su ON cc.challenge_template_id = su.challenge_template_id AND cc.user_id = su.user_id
-                WHERE cc.started_at < su.last_flag_time
-            ),
-            avg_times AS (
-                SELECT
-                    challenge_template_id,
-                    user_id,
-                    SUM(duration_minutes) AS total_duration
-                FROM valid_sessions
-                GROUP BY challenge_template_id, user_id
-            )
-            SELECT COALESCE(ROUND(AVG(total_duration)), 0) AS avg_completion_minutes
-            FROM avg_times
-            JOIN challenge_templates ct ON avg_times.challenge_template_id = ct.id
-            WHERE ct.creator_id = :user_id
-        ";
     }
 
     private function handleError(Exception $e): void
@@ -836,15 +643,15 @@ class CTFManagementHandler
         $errorMessage = $errorCode >= 500 ? 'An internal server error occurred' : $e->getMessage();
 
         if ($errorCode === 401) {
-            session_unset();
-            session_destroy();
-            logWarning("Session destroyed due to unauthorized access");
+            $this->session->unset();
+            $this->session->destroy();
+            $this->logger->logWarning("Session destroyed due to unauthorized access");
         }
 
         if ($errorCode >= 500) {
-            logError("Internal error in CTF management: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            $this->logger->logError("Internal error in CTF management: " . $e->getMessage() . "\n" . $e->getTraceAsString());
         } else {
-            logWarning("CTF management error: " . $e->getMessage());
+            $this->logger->logWarning("CTF management error: " . $e->getMessage());
         }
 
         http_response_code($errorCode);
@@ -853,17 +660,27 @@ class CTFManagementHandler
             'message' => $errorMessage,
             'redirect' => $errorCode === 401 ? '/login' : null
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new CTFManagementHandler($config, $generalConfig);
+    $config = require __DIR__ . '/../config/backend.config.php';
+    $system = new SystemWrapper();
+    $generalConfig = json_decode($system->file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+
+    $handler = new CTFManagementHandler(config: $config, generalConfig: $generalConfig);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in manage-ctf endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in manage-ctf endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -874,4 +691,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in manage-ctf endpoint: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

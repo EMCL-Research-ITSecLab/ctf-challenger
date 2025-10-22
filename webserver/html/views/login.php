@@ -1,7 +1,9 @@
 <?php
-require_once __DIR__ . '/../includes/security.php';
-init_secure_session();
-$csrf_token = generate_csrf_token();
+require_once __DIR__ . '/../vendor/autoload.php';
+
+$securityHelper = new SecurityHelper();
+$securityHelper->initSecureSession();
+$csrf_token = $securityHelper->generateCsrfToken();
 ?>
 <!DOCTYPE html>
 <html lang="en">

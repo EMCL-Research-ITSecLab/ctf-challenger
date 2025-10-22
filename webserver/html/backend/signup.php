@@ -1,14 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-require_once __DIR__ . '/../includes/curlHelper.php';
-require_once __DIR__ . '/../includes/auth.php';
-$generalConfig = json_decode(file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class RegistrationHandler
 {
@@ -19,293 +12,256 @@ class RegistrationHandler
     private string $confirmPassword;
     private string $csrfToken;
     private array $generalConfig;
+    private string $route;
 
-    public function __construct(array $generalConfig)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+    private IAuthHelper $authHelper;
+    private ICurlHelper $curlHelper;
+
+    private ISession $session;
+    private IServer $server;
+    private IPost $post;
+    private ICookie $cookie;
+
+    private ISystem $system;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $generalConfig,
+        
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+        IAuthHelper $authHelper = null,
+        ICurlHelper $curlHelper = null,
+        
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IPost $post = new Post(),
+        
+        ISystem $system = new SystemWrapper(),
+        IEnv $env = new Env(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->post = $post;
+        $this->cookie = $cookie;
+        $this->route = "/signup";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+        $this->authHelper = $authHelper ?? new AuthHelper($logger, $system, $env);
+        $this->curlHelper = $curlHelper ?? new CurlHelper($env);
+
+        $this->system = $system;
+
         $this->generalConfig = $generalConfig;
         $this->initSession();
         $this->validateRequestMethod();
         $this->parseInput();
-        logDebug("Initialized RegistrationHandler with Session ID: " . session_id());
+        $this->logger->logDebug("Initialized RegistrationHandler with Session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
     }
 
-    private function initSession()
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
     }
 
-    private function validateRequestMethod()
+    /**
+     * @throws Exception
+     */
+    private function validateRequestMethod(): void
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            throw new Exception('Invalid request method', 400);
+        if ($this->server['REQUEST_METHOD'] !== 'POST') {
+            throw new CustomException('Invalid request method', 405);
         }
     }
 
-    private function parseInput()
+    private function parseInput(): void
     {
-        $this->csrfToken = $_POST['csrf_token'] ?? '';
-        $this->username = trim($_POST['username'] ?? '');
-        $this->email = trim($_POST['email'] ?? '');
-        $this->password = $_POST['password'] ?? '';
-        $this->confirmPassword = $_POST['confirm-password'] ?? '';
+        $this->csrfToken = $this->post['csrf_token'] ?? '';
+        $this->username = trim($this->post['username'] ?? '');
+        $this->email = trim($this->post['email'] ?? '');
+        $this->password = $this->post['password'] ?? '';
+        $this->confirmPassword = $this->post['confirm-password'] ?? '';
     }
 
-    public function handleRequest()
+    public function handleRequest(): void
     {
         try {
             $this->validateInput();
             $this->validateCsrfToken();
             $this->checkCredentialsAvailability();
-            $userId = $this->createUserAccount();
-            $vpnIp = $this->assignVpnIp($userId);
-            $this->generateAndSaveVpnConfig($userId);
+            $create_data = $this->createUserAccount();
+            $userId = $create_data['user_id'];
+            $vpnIp = $create_data['vpn_static_ip'];
             $this->updateLastLogin($userId);
             $this->initializeUserSession($userId);
             $this->sendSuccessResponse($userId, $vpnIp);
-        } catch (Exception $e) {
+        } catch (CustomException $e) {
             $this->handleError($e);
+        } catch (Exception $e) {
+            $this->handleError(new Exception('Internal Server Error', 500));
         }
     }
 
-    private function validateInput()
+    /**
+     * @throws Exception
+     */
+    private function validateInput(): void
     {
         if (empty($this->username) || empty($this->email) || empty($this->password) || empty($this->confirmPassword)) {
-            throw new Exception('All fields are required', 400);
+            throw new CustomException('All fields are required', 400);
         } elseif (strlen($this->username) < $this->generalConfig['user']['MIN_USERNAME_LENGTH']) {
-            throw new Exception('Username must be at least' . $this->generalConfig['user']['MIN_USERNAME_LENGTH'] . 'characters long', 400);
+            throw new CustomException('Username must be at least' . $this->generalConfig['user']['MIN_USERNAME_LENGTH'] . 'characters long', 400);
         } elseif (strlen($this->username) > $this->generalConfig['user']['MAX_USERNAME_LENGTH']) {
-            throw new Exception('Username must not extend ' . $this->generalConfig['user']['MAX_USERNAME_LENGTH'], 400);
+            throw new CustomException('Username must not exceed ' . $this->generalConfig['user']['MAX_USERNAME_LENGTH'] . 'characters', 400);
         } elseif (!preg_match('/' . $this->generalConfig['user']['USERNAME_REGEX'] . '/', $this->username)) {
-            throw new Exception("Username contains invalid characters only '_' is allowed", 400);
+            throw new CustomException("Username contains invalid characters only '_' is allowed", 400);
         }
 
         if (strlen($this->email) > $this->generalConfig['user']['MAX_EMAIL_LENGTH']) {
-            throw new Exception('Email must not extend ' . $this->generalConfig['user']['MAX_EMAIL_LENGTH'], 400);
+            throw new CustomException('Email must not exceed ' . $this->generalConfig['user']['MAX_EMAIL_LENGTH'] . 'characters', 400);
         } elseif (!filter_var($this->email, FILTER_VALIDATE_EMAIL)) {
-            throw new Exception('Invalid email format', 400);
+            throw new CustomException('Invalid email format', 400);
         }
 
         if (strlen($this->password) < $this->generalConfig['user']['MIN_PASSWORD_LENGTH']) {
-            throw new Exception('Password must be at least' . $this->generalConfig['user']['MIN_PASSWORD_LENGTH'] . 'characters long', 400);
+            throw new CustomException('Password must be at least ' . $this->generalConfig['user']['MIN_PASSWORD_LENGTH'] . 'characters long', 400);
         } elseif (strlen($this->password) > $this->generalConfig['user']['MAX_PASSWORD_LENGTH']) {
-            throw new Exception('Password must not exceed ' . $this->generalConfig['user']['MAX_PASSWORD_LENGTH'], 400);
+            throw new CustomException('Password must not exceed ' . $this->generalConfig['user']['MAX_PASSWORD_LENGTH'] . 'characters', 400);
         }
 
         if ($this->password !== $this->confirmPassword) {
-            throw new Exception('Passwords do not match', 400);
+            throw new CustomException('Passwords do not match', 400);
         }
     }
 
-    private function validateCsrfToken()
+    /**
+     * @throws Exception
+     */
+    private function validateCsrfToken(): void
     {
-        if (!validate_csrf_token($this->csrfToken)) {
-            logError("CSRF token validation failed from IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown') ." with csrf_token={$this->csrfToken}");
-            throw new Exception('Invalid CSRF token', 403);
+        if (!$this->securityHelper->validateCsrfToken($this->csrfToken)) {
+            $this->logger->logError("CSRF token validation failed from IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown') ." with csrf_token=$this->csrfToken");
+            throw new CustomException('Invalid CSRF token', 403);
         }
     }
 
-    private function checkCredentialsAvailability()
+    /**
+     * @throws Exception
+     */
+    private function checkCredentialsAvailability(): void
     {
-        $this->pdo = getPDO();
+        $this->pdo = $this->databaseHelper->getPDO();
 
-        $stmt = $this->pdo->prepare("SELECT id FROM users WHERE username = :username");
+        $stmt = $this->pdo->prepare("SELECT is_username_taken(:username)");
         $stmt->execute(['username' => $this->username]);
-        if ($stmt->fetch()) {
-            logWarning("Registration attempt with existing username: {$this->username}");
-            throw new Exception('Username already taken', 400);
+        if ($stmt->fetch(PDO::FETCH_COLUMN) == 1) {
+            $this->logger->logWarning("Registration attempt with existing username: $this->username");
+            throw new CustomException('Username already taken', 400);
         }
 
-        $stmt = $this->pdo->prepare("SELECT id FROM users WHERE email = :email");
+        $stmt = $this->pdo->prepare("SELECT is_email_taken(:email)");
         $stmt->execute(['email' => $this->email]);
-        if ($stmt->fetch()) {
-            logWarning("Registration attempt with existing email: {$this->email}");
-            throw new Exception('Email already registered', 400);
+        if ($stmt->fetch(PDO::FETCH_COLUMN) == 1) {
+            $this->logger->logWarning("Registration attempt with existing email: $this->email");
+            throw new CustomException('Email already registered', 400);
         }
     }
 
+    /**
+     * @throws Exception
+     */
     private function createUserAccount()
     {
-        $passwordHash = password_hash($this->password, PASSWORD_DEFAULT);
-        if ($passwordHash === false) {
-            throw new Exception('Account creation failed', 500);
+        $passwordSalt = bin2hex(random_bytes(16));
+        $passwordHash = hash('sha512', $passwordSalt . $this->password);
+        if (!$passwordHash) {
+            // @codeCoverageIgnoreStart
+            // This should never happen unless the server is misconfigured
+            throw new CustomException('Account creation failed', 500);
+            // @codeCoverageIgnoreEnd
         }
 
         $this->pdo->beginTransaction();
+        $ip_addr = $_SERVER['REMOTE_ADDR'];
 
         try {
-            $stmt = $this->pdo->prepare("
-                INSERT INTO users (username, email, password_hash)
-                VALUES (:username, :email, :password_hash)
-                RETURNING id
-            ");
+            $stmt = $this->pdo->prepare("SELECT id AS user_id, vpn_static_ip FROM create_user(:username, :email, :password_hash, :password_salt, :ip_addr)");
             $stmt->execute([
                 'username' => $this->username,
                 'email' => $this->email,
-                'password_hash' => $passwordHash
+                'password_hash' => $passwordHash,
+                'password_salt' => $passwordSalt,
+                'ip_addr' => $ip_addr
             ]);
-            $userId = $stmt->fetchColumn();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$userId) {
-                throw new Exception('Account creation failed', 500);
+            if (!$result || empty($result['user_id']) || empty($result['vpn_static_ip'])) {
+                throw new CustomException('Account creation failed', 500);
             }
 
-            return $userId;
+            return $result;
+        } catch (CustomException $e) {
+            $this->pdo->rollBack();
+            $this->logger->logError("Database transaction failed: " . $e->getMessage());
+            throw new CustomException('Account creation failed', 500);
+        } catch (PDOException $e) {
+            $this->pdo->rollBack();
+            $this->logger->logError("Database error during account creation: " . $e->getMessage());
+            throw new CustomException('Account creation failed', 500);
         } catch (Exception $e) {
             $this->pdo->rollBack();
-            logError("Database transaction failed: " . $e->getMessage());
-            throw new Exception('Account creation failed', 500);
+            $this->logger->logError("Unexpected error during account creation: " . $e->getMessage());
+            throw new Exception('Internal Server Error', 500);
+        } finally {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->commit();
+            }
         }
     }
 
-    private function assignVpnIp($userId)
+    private function updateLastLogin(int $userId): void
     {
-        try {
-            $stmt = $this->pdo->prepare("SELECT assign_lowest_vpn_ip(:user_id)");
-            $stmt->execute(['user_id' => $userId]);
-            $vpnIp = $stmt->fetchColumn();
-
-            if ($vpnIp) {
-                $stmt = $this->pdo->prepare("UPDATE users SET vpn_static_ip = :vpn_ip WHERE id = :id");
-                $stmt->execute(['vpn_ip' => $vpnIp, 'id' => $userId]);
-            }
-
-            $this->pdo->commit();
-            return $vpnIp;
-        } catch (Exception $e) {
-            $this->pdo->rollBack();
-            logError("VPN IP assignment failed: " . $e->getMessage());
-            throw new Exception('VPN setup failed', 500);
-        }
-    }
-
-    private function generateAndSaveVpnConfig($userId)
-    {
-        $configResponse = $this->generateVpnConfig($userId);
-
-        if (!$configResponse['success']) {
-            logError("VPN config generation failed for user {$userId}: " . $configResponse['message']);
-            throw new Exception('VPN setup incomplete', 500);
-        }
-
-        $configSaved = $this->saveVpnConfig($userId, $configResponse['config_content']);
-        if (!$configSaved) {
-            logError("Failed to save VPN config file for user {$userId}");
-            throw new Exception('VPN setup incomplete', 500);
-        }
-    }
-
-    private function generateVpnConfig($userId)
-    {
-        try {
-            $result = makeBackendRequest(
-                '/create-user-config',
-                'POST',
-                getBackendHeaders(),
-                ['user_id' => $userId]
-            );
-
-            if (!$result['success']) {
-                $error = $result['error'] ?? 'HTTP ' . $result['http_code'];
-                logError("VPN config API failed: {$error}");
-                return [
-                    'success' => false,
-                    'message' => 'Backend request failed: ' . ($result['error'] ?? 'HTTP ' . $result['http_code'])
-                ];
-            }
-
-            $isFileDownload = false;
-            if (isset($result['headers']['content-type'])) {
-                $isFileDownload = strpos($result['headers']['content-type'], 'application/octet-stream') !== false;
-            }
-
-            if ($isFileDownload) {
-                return [
-                    'success' => true,
-                    'config_content' => $result['response']
-                ];
-            }
-
-            $jsonResponse = json_decode($result['response'], true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                if (isset($jsonResponse['error'])) {
-                    logError("VPN config error: {$jsonResponse['error']}");
-                    return [
-                        'success' => false,
-                        'message' => $jsonResponse['error']
-                    ];
-                }
-                return $jsonResponse;
-            }
-
-            logError("Unexpected VPN config response format");
-            return [
-                'success' => false,
-                'message' => 'Unexpected response format'
-            ];
-        } catch (Exception $e) {
-            logError("VPN config generation error for user {$userId}: " . $e->getMessage());
-            return [
-                'success' => false,
-                'message' => 'Configuration service error'
-            ];
-        }
-    }
-
-    private function saveVpnConfig($userId, $configContent)
-    {
-        try {
-            $configDir = '/var/lib/ctf-challenger/vpn-configs/';
-            if (!file_exists($configDir) && !mkdir($configDir, 0755, true)) {
-                throw new Exception('Error creating VPN config directory', 500);
-            }
-
-            $filename = $configDir . 'user_' . $userId . '.ovpn';
-            $bytesWritten = file_put_contents($filename, $configContent);
-
-            if ($bytesWritten === false) {
-                throw new Exception('Error creating VPN config file', 500);
-            }
-
-            return true;
-        } catch (Exception $e) {
-            logError("Config save failed: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    private function updateLastLogin(int $userId)
-    {
-        $update = $this->pdo->prepare("UPDATE users SET last_login = NOW() WHERE id = :id");
+        $update = $this->pdo->prepare("SELECT update_last_login(:id)");
         $update->execute(['id' => $userId]);
     }
 
-    private function initializeUserSession($userId)
+    private function initializeUserSession($userId): void
     {
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = $userId;
-        $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'];
-        $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'];
-        $_SESSION['last_activity'] = time();
-        $_SESSION['authenticated'] = true;
-        $_SESSION['username'] = $this->username;
+        $this->session->regenerate_id(true);
+        $this->session['user_id'] = $userId;
+        $this->session['ip'] = $this->server['REMOTE_ADDR'];
+        $this->session['user_agent'] = $this->server['HTTP_USER_AGENT'];
+        $this->session['last_activity'] = $this->system->time();
+        $this->session['authenticated'] = true;
+        $this->session['username'] = $this->username;
 
-        $newCsrf = generate_csrf_token();
-        setcookie(
+        $newCsrf = $this->securityHelper->generateCsrfToken();
+        $this->system->setcookie(
             'csrf_token',
             $newCsrf,
             [
-                'expires' => time() + 3600,
+                'expires' => $this->system->time() + 3600,
                 'path' => '/',
                 'secure' => true,
-                'httponly' => false,
+                'httponly' => true,
                 'samesite' => 'Strict'
             ]
         );
 
-        logInfo("Successful registration for user {$userId}");
+        $this->logger->logInfo("Successful registration for user $userId");
     }
 
-    private function sendSuccessResponse($userId, $vpnIp)
+    private function sendSuccessResponse($userId, $vpnIp): void
     {
         echo json_encode([
             'success' => true,
@@ -313,32 +269,42 @@ class RegistrationHandler
             'user_id' => $userId,
             'vpn_ip' => $vpnIp
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 
-    private function handleError(Exception $e)
+    private function handleError(Exception $e): void
     {
         $code = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 400;
         http_response_code($code);
 
-        logError("Registration error: " . $e->getMessage() . " [Code: {$code}]");
+        $this->logger->logError("Registration error: " . $e->getMessage() . " [Code: $code]");
 
         echo json_encode([
             'success' => false,
             'message' => $e->getMessage(),
             'error_code' => $code
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new RegistrationHandler($generalConfig);
+    header('Content-Type: application/json');
+    $system = new SystemWrapper();
+    $generalConfig = json_decode($system->file_get_contents(__DIR__ . '/../config/general.config.json'), true);
+
+    $handler = new RegistrationHandler(generalConfig: $generalConfig);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in signup endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in signup endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -349,4 +315,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in signup endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

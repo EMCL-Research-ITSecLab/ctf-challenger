@@ -1,11 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class LoginHandler
 {
@@ -14,169 +10,229 @@ class LoginHandler
     private string $username;
     private string $password;
     private string $csrfToken;
+    private string $route;
 
-    public function __construct()
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IPost $post;
+    private ICookie $cookie;
+    
+    private ISystem $system;
+
+    public function __construct(
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IPost $post = new Post(),
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->post = $post;
+        $this->cookie = $cookie;
+        $this->route = "/login";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+        
+        $this->system = $system;
+
         $this->initSession();
         $this->validateRequestMethod();
         $this->checkAlreadyAuthenticated();
-        logDebug("Initialized LoginHandler with Session ID: " . session_id());
+        $this->logger->logDebug("Initialized LoginHandler with Session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
     }
 
-    private function initSession()
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
     }
 
-    private function validateRequestMethod()
+    private function validateRequestMethod(): void
     {
-        $this->isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+        $this->isPost = $this->server['REQUEST_METHOD'] === 'POST';
     }
 
-    private function checkAlreadyAuthenticated()
+    private function checkAlreadyAuthenticated(): void
     {
-        if (validate_session() && !empty($_SESSION['authenticated'])) {
+        if ($this->securityHelper->validateSession(false) && !empty($this->session['authenticated'])) {
             $this->handleAlreadyAuthenticated();
         }
     }
 
-    private function handleAlreadyAuthenticated()
+    private function handleAlreadyAuthenticated(): void
     {
         $redirectUrl = '/dashboard';
-        $userId = $_SESSION['user_id'];
-        $username = $_SESSION['username'];
-        $ip = anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $userId = $this->session['user_id'];
+        $username = $this->session['username'];
+        $ip = $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown');
 
-        logWarning("User already authenticated - User ID: {$userId}, Username: {$username}, IP: {$ip}");
+        $this->logger->logWarning("User already authenticated - User ID: $userId, Username: $username, IP: $ip");
 
-        $existingCsrf = $_SESSION['csrf_token'] ?? generate_csrf_token();
-        if (!isset($_SESSION['csrf_token'])) {
-            $_SESSION['csrf_token'] = $existingCsrf;
-            logDebug("Generated new CSRF token for user ID: {$userId}");
+        if (!isset($this->session['csrf_token'])) {
+            $this->securityHelper->generateCsrfToken();
+            $this->logger->logDebug("Generated new CSRF token for user ID: $userId");
         }
 
-        $this->setCsrfCookie($existingCsrf);
+        $csrf = $this->session['csrf_token'];
+
+        $this->setCsrfCookie($csrf);
 
         echo json_encode([
             'success' => true,
             'redirect' => $redirectUrl,
-            'csrf_token' => $existingCsrf
+            'csrf_token' => $csrf
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 
-    public function handleRequest()
+    public function handleRequest(): void
     {
         try {
             if ($this->isPost) {
                 $this->processLogin();
             }
         } catch (PDOException $e) {
-            logError("Database error during login: " . $e->getMessage());
-            $this->respondWithError('A database error occurred.', 500, 'server');
-        } catch (Exception $e) {
-            logError("Login error: " . $e->getMessage());
+            $this->logger->logError("Database error during login: " . $e->getMessage());
+            $this->respondWithError('Database error occurred', 500, 'server');
+        } catch (CustomException $e) {
+            $this->logger->logError("Login error: " . $e->getMessage());
             $this->respondWithError($e->getMessage(), $e->getCode(), 'auth');
+        } catch (Exception $e) {
+            $this->logger->logError("Unexpected error during login: " . $e->getMessage());
+            $this->respondWithError('Internal Server Error', 500, 'server');
         }
     }
 
-    private function processLogin()
+    /**
+     * @throws Exception
+     */
+    private function processLogin(): void
     {
         $this->parseInput();
         $this->validateInput();
         $this->authenticateUser();
     }
 
-    private function parseInput()
+    private function parseInput(): void
     {
-        $this->csrfToken = $_POST['csrf_token'] ?? '';
-        $this->username = trim($_POST['username'] ?? '');
-        $this->password = $_POST['password'] ?? '';
+        $this->csrfToken = $this->post['csrf_token'] ?? '';
+        $this->username = trim($this->post['username'] ?? '');
+        $this->password = $this->post['password'] ?? '';
     }
 
-    private function validateInput()
+    /**
+     * @throws Exception
+     */
+    private function validateInput(): void
     {
         if (empty($this->csrfToken)) {
-            logError("Empty CSRF token - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Invalid request token.', 403);
+            $this->logger->logError("Empty CSRF token - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Invalid request token.', 403);
         }
 
-        if (!validate_csrf_token($this->csrfToken)) {
-            logError("Invalid CSRF token - Received: {$this->csrfToken}, IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown') .", Username: {$this->username}");
-            throw new Exception('Invalid request token.', 403);
+        if (!$this->securityHelper->validateCsrfToken($this->csrfToken)) {
+            $this->logger->logError("Invalid CSRF token - Received: $this->csrfToken, IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown') .", Username: $this->username");
+            throw new CustomException('Invalid CSRF token', 403);
         }
 
         if (empty($this->username)) {
-            logError("Empty username provided - IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Username is required.', 400);
+            $this->logger->logError("Empty username provided - IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Username is required.', 400);
         }
 
         if (empty($this->password)) {
-            logError("Empty password provided - Username: {$this->username}, IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Password is required.', 400);
+            $this->logger->logError("Empty password provided - Username: $this->username, IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Password is required.', 400);
         }
     }
 
-    private function authenticateUser()
+    /**
+     * @throws Exception
+     */
+    private function authenticateUser(): void
     {
-        $this->pdo = getPDO();
+        $this->pdo = $this->databaseHelper->getPDO();
 
-        $user = $this->findUserByUsername();
-        $this->verifyPassword($user);
-        $this->updateLastLogin($user['id']);
-        $this->initializeUserSession($user);
-        $this->sendSuccessResponse($user);
+        $passwordSalt = $this->getUserPasswordSalt();
+        $userId = $this->verifyPassword($passwordSalt);
+        $this->updateLastLogin($userId);
+        $this->initializeUserSession($userId, $this->username);
+        $this->sendSuccessResponse();
     }
 
-    private function findUserByUsername()
+    /**
+     * @throws Exception
+     */
+    private function getUserPasswordSalt()
     {
-        $stmt = $this->pdo->prepare("
-            SELECT id, username, password_hash
-            FROM users
-            WHERE username = :username
-            LIMIT 1
-        ");
+        $stmt = $this->pdo->prepare("SELECT get_user_password_salt(:username) AS password_salt");
         $stmt->execute(['username' => $this->username]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $passwordSalt = $result['password_salt'] ?? null;
 
-        if (!$user) {
-            logError("User not found - Username: {$this->username}, IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Invalid username or password.', 401);
+        if ($passwordSalt === null) {
+            $this->logger->logError("User not found - Username: $this->username, IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Invalid username or password.', 401);
         }
 
-        return $user;
+        return $passwordSalt;
     }
 
-    private function verifyPassword(array $user)
+    /**
+     * @throws Exception
+     */
+    private function verifyPassword(string $passwordSalt): int
     {
-        if (!password_verify($this->password, $user['password_hash'])) {
-            logError("Invalid password attempt - User ID: {$user['id']}, Username: {$this->username}, IP: " . anonymizeIp($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            throw new Exception('Invalid username or password.', 401);
+        $passwordHash = hash('sha512', $passwordSalt . $this->password);
+
+        $stmt = $this->pdo->prepare("SELECT authenticate_user(:username, :password_hash) AS user_id");
+        $stmt->execute([
+            'username' => $this->username,
+            'password_hash' => $passwordHash
+        ]);
+        $user_id = $stmt->fetchColumn();
+
+        if (!$user_id) {
+            $this->logger->logError("Invalid password attempt - Username: $this->username, IP: " . $this->logger->anonymizeIp($this->server['REMOTE_ADDR'] ?? 'unknown'));
+            throw new CustomException('Invalid username or password.', 401);
         }
+
+        return (int)$user_id;
     }
 
-    private function updateLastLogin(int $userId)
+    private function updateLastLogin(int $userId): void
     {
-        $update = $this->pdo->prepare("UPDATE users SET last_login = NOW() WHERE id = :id");
+        $update = $this->pdo->prepare("SELECT update_last_login(:id)");
         $update->execute(['id' => $userId]);
     }
 
-    private function initializeUserSession(array $user)
+    private function initializeUserSession(int $user_id, string $username): void
     {
-        session_regenerate_id(true);
-        logDebug("Session regenerated - User ID: {$user['id']}, New Session ID: " . session_id());
+        $this->session->regenerate_id(true);
+        $this->logger->logDebug("Session regenerated - User ID: {$user_id}, New Session ID: " . $this->session->id() ? hash('sha256', $this->session->id()) : 'no-session');
 
-        $_SESSION['user_id'] = $user['id'];
-        $_SESSION['authenticated'] = true;
-        $_SESSION['ip'] = $_SERVER['REMOTE_ADDR'] ?? '';
-        $_SESSION['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        $_SESSION['last_activity'] = time();
-        $_SESSION['username'] = $user['username'];
+        $this->session['user_id'] = $user_id;
+        $this->session['authenticated'] = true;
+        $this->session['ip'] = $this->server['REMOTE_ADDR'] ?? '';
+        $this->session['user_agent'] = $this->server['HTTP_USER_AGENT'] ?? '';
+        $this->session['last_activity'] = $this->system->time();
+        $this->session['username'] = $username;
     }
 
-    private function sendSuccessResponse(array $user)
+    private function sendSuccessResponse(): void
     {
-        $newCsrf = generate_csrf_token();
+        $newCsrf = $this->securityHelper->generateCsrfToken();
         $this->setCsrfCookie($newCsrf);
 
         echo json_encode([
@@ -185,25 +241,25 @@ class LoginHandler
             'redirect' => '/dashboard',
             'csrf_token' => $newCsrf
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 
-    private function setCsrfCookie(string $token)
+    private function setCsrfCookie(string $token): void
     {
-        setcookie(
+        $this->system->setcookie(
             'csrf_token',
             $token,
             [
-                'expires' => time() + 3600,
+                'expires' => $this->system->time() + 3600,
                 'path' => '/',
                 'secure' => true,
-                'httponly' => false,
+                'httponly' => true,
                 'samesite' => 'Strict'
             ]
         );
     }
 
-    private function respondWithError(string $message, int $statusCode, string $type = 'general')
+    private function respondWithError(string $message, int $statusCode, string $type = 'general'): void
     {
         http_response_code($statusCode);
         echo json_encode([
@@ -211,17 +267,26 @@ class LoginHandler
             'type' => $type,
             'message' => $message
         ]);
-        exit;
+        defined('PHPUNIT_RUNNING') || exit;
     }
 }
 
+
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
+    header('Content-Type: application/json');
+
     $handler = new LoginHandler();
     $handler->handleRequest();
-} catch (Throwable $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in login endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in login endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -232,4 +297,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in login endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

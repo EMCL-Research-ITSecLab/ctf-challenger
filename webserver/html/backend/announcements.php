@@ -1,12 +1,7 @@
 <?php
 declare(strict_types=1);
 
-header('Content-Type: application/json');
-
-require_once __DIR__ . '/../includes/logger.php';
-require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/security.php';
-$config = require __DIR__ . '/../config/backend.config.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 class AnnouncementsHandler
 {
@@ -16,148 +11,156 @@ class AnnouncementsHandler
     private string $importanceFilter;
     private string $rangeFilter;
     private array $config;
+    private string $route;
 
-    public function __construct(array $config)
+    private IDatabaseHelper $databaseHelper;
+    private ISecurityHelper $securityHelper;
+    private ILogger $logger;
+
+    private ISession $session;
+    private IServer $server;
+    private IGet $get;
+    private ICookie $cookie;
+
+    /**
+     * @throws Exception
+     */
+    public function __construct(
+        array $config,
+
+        IDatabaseHelper $databaseHelper = null,
+        ISecurityHelper $securityHelper = null,
+        ILogger $logger = null,
+
+        ISession $session = new Session(),
+        IServer $server = new Server(),
+        IGet $get = new Get(),
+
+        ISystem $system = new SystemWrapper(),
+        ICookie $cookie = new Cookie()
+    )
     {
+        $this->session = $session;
+        $this->server = $server;
+        $this->get = $get;
+        $this->cookie = $cookie;
+        $this->route = "/announcements";
+
+        $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
+        $this->securityHelper = $securityHelper ?? new SecurityHelper($logger, $session, $system);
+        $this->logger = $logger ?? new Logger(route: $this->route, system: $system);
+
         $this->config = $config;
         $this->initSession();
         $this->validateRequest();
-        $this->pdo = getPDO();
+        $this->pdo = $this->databaseHelper->getPDO();
         $this->parseInputParameters();
-        logDebug("Initialized AnnouncementsHandler");
+        $this->logger->logDebug("Initialized AnnouncementsHandler");
     }
 
-    private function initSession()
+    /**
+     * @throws Exception
+     */
+    private function initSession(): void
     {
-        init_secure_session();
+        $this->securityHelper->initSecureSession();
 
-        if (!validate_session()) {
-            logWarning('Unauthorized access attempt to announcements route');
-            throw new Exception('Unauthorized', 401);
+        if (!$this->securityHelper->validateSession()) {
+            $this->logger->logWarning('Unauthorized access attempt to announcements route');
+            throw new CustomException('Unauthorized', 401);
         }
     }
 
-    private function validateRequest()
+    /**
+     * @throws Exception
+     */
+    private function validateRequest(): void
     {
-        $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        if (!validate_csrf_token($csrfToken)) {
-            logWarning('Invalid CSRF token attempt from user ID: ' . ($_SESSION['user_id'] ?? 'unknown'));
-            throw new Exception('Invalid CSRF token', 403);
+        $csrfToken = $this->cookie['csrf_token'] ?? '';
+        if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
+            $this->logger->logWarning('Invalid CSRF token attempt from user ID: ' . ($this->session['user_id'] ?? 'unknown'));
+            throw new CustomException('Invalid CSRF token', 403);
         }
     }
 
-    private function parseInputParameters()
+    /**
+     * @throws Exception
+     */
+    private function parseInputParameters(): void
     {
-        $this->page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT, [
-            'options' => ['default' => 1, 'min_range' => 1]
-        ]);
+        $this->page = (int)$this->get['page'] ?? 1;
+        $this->page = max($this->page, 1);
 
-        $this->importanceFilter = $_GET['importance'] ?? 'all';
+        $this->importanceFilter = $this->get['importance'] ?? 'all';
         if (!in_array($this->importanceFilter, $this->config['filters']['IMPORTANCE_LEVELS'])) {
-            logWarning('Invalid importance filter provided: ' . $this->importanceFilter);
-            throw new Exception('Invalid importance value', 400);
+            $this->logger->logWarning('Invalid importance filter provided: ' . $this->importanceFilter);
+            throw new CustomException('Invalid importance value', 400);
         }
 
-        $this->rangeFilter = $_GET['range'] ?? 'all';
+        $this->rangeFilter = $this->get['range'] ?? 'all';
         if (!in_array($this->rangeFilter, $this->config['filters']['ACTIVITY_RANGES'])) {
-            logWarning('Invalid range filter provided: ' . $this->rangeFilter);
-            throw new Exception('Invalid date range value', 400);
+            $this->logger->logWarning('Invalid range filter provided: ' . $this->rangeFilter);
+            throw new CustomException('Invalid date range value', 400);
         }
     }
 
-    public function handleRequest()
+    /**
+     * @throws Exception
+     */
+    public function handleRequest(): void
     {
         try {
-            $dateRange = $this->getDateRange();
-            $params = [];
-            $whereConditions = $this->buildWhereConditions($dateRange, $params);
-
-            $baseQuery = "SELECT * FROM announcements";
-            $countQuery = "SELECT COUNT(*) FROM announcements";
-
-            if (!empty($whereConditions)) {
-                $whereClause = " WHERE " . implode(" AND ", $whereConditions);
-                $baseQuery .= $whereClause;
-                $countQuery .= $whereClause;
-            }
-
-            $total = $this->getTotalCount($countQuery, $params);
-            $announcements = $this->getPaginatedResults($baseQuery, $params, $total);
+            $total = $this->getTotalCount();
+            $announcements = $this->getPaginatedResults();
 
             $this->sendResponse($announcements, $total);
         } catch (PDOException $e) {
-            logError("Database error in announcements route: " . $e->getMessage());
-            throw new Exception('Database error occurred', 500);
+            $this->logger->logError("Database error in announcements route: " . $e->getMessage());
+            throw new CustomException('Database error occurred', 500);
         }
     }
 
-    private function getDateRange()
+    private function getTotalCount(): int
     {
-        if ($this->rangeFilter === 'all') {
-            return null;
-        }
+        $stmt = $this->pdo->prepare("
+            SELECT get_filtered_announcements_count(:importance, :date_range) AS total
+        ");
 
-        $date = new DateTime();
-        switch ($this->rangeFilter) {
-            case 'today':
-                $date->setTime(0, 0, 0);
-                break;
-            case 'week':
-                $date->modify('-1 week');
-                break;
-            case 'month':
-                $date->modify('-1 month');
-                break;
-            case 'year':
-                $date->modify('-1 year');
-                break;
-        }
-        return $date->format('Y-m-d H:i:s');
-    }
-
-    private function buildWhereConditions($dateRange, &$params)
-    {
-        $conditions = [];
-
-        if ($this->importanceFilter !== 'all') {
-            $conditions[] = "importance = :importance";
-            $params['importance'] = $this->importanceFilter;
-        }
-
-        if ($dateRange) {
-            $conditions[] = "created_at >= :date_range";
-            $params['date_range'] = $dateRange;
-        }
-
-        return $conditions;
-    }
-
-    private function getTotalCount($query, $params)
-    {
-        $stmt = $this->pdo->prepare($query);
-
-        foreach ($params as $key => $val) {
-            $stmt->bindValue($key, $val);
-        }
-
-        $stmt->execute();
+        $stmt->execute(
+            [
+                'importance' => $this->importanceFilter === 'all' ? null : $this->importanceFilter,
+                'date_range' => $this->rangeFilter === 'all' ? null : $this->rangeFilter
+            ]
+        );
         return $stmt->fetchColumn();
     }
 
-    private function getPaginatedResults($query, $params, $total)
+    private function getPaginatedResults(): array
     {
         $offset = ($this->page - 1) * $this->perPage;
-        $query .= " ORDER BY created_at DESC LIMIT :limit OFFSET :offset";
 
-        $stmt = $this->pdo->prepare($query);
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                id,
+                title,
+                content,
+                short_description,
+                importance,
+                category,
+                author,
+                created_at,
+                updated_at
+            FROM get_filtered_announcements(:importance, :date_range, :limit, :offset)
+        ");
 
-        foreach ($params as $key => $val) {
-            $stmt->bindValue($key, $val);
-        }
-
-        $stmt->bindValue(':limit', $this->perPage, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-        $stmt->execute();
+        $stmt->execute(
+            [
+                'importance' => $this->importanceFilter === 'all' ? null : $this->importanceFilter,
+                'date_range' => $this->rangeFilter === 'all' ? null : $this->rangeFilter,
+                'limit' => $this->perPage,
+                'offset' => $offset
+            ]
+        );
 
         $announcements = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -166,7 +169,7 @@ class AnnouncementsHandler
         return $announcements;
     }
 
-    private function formatAnnouncement($row)
+    private function formatAnnouncement($row): array
     {
         return [
             'id' => $row['id'],
@@ -179,7 +182,7 @@ class AnnouncementsHandler
         ];
     }
 
-    private function sendResponse($announcements, $total)
+    private function sendResponse($announcements, $total): void
     {
         echo json_encode([
             'success' => true,
@@ -194,13 +197,22 @@ class AnnouncementsHandler
     }
 }
 
+// @codeCoverageIgnoreStart
+
+if(defined('PHPUNIT_RUNNING'))
+    return;
+
 try {
-    $handler = new AnnouncementsHandler($config);
+    header('Content-Type: application/json');
+    $config = require __DIR__ . '/../config/backend.config.php';
+
+    $handler = new AnnouncementsHandler(config: $config);
     $handler->handleRequest();
-} catch (Exception $e) {
+} catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    logError("Error in announcements endpoint: " . $e->getMessage() . " (Code: $errorCode)");
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Error in announcements endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
         'message' => $e->getMessage()
@@ -211,4 +223,14 @@ try {
     }
 
     echo json_encode($response);
+} catch (Exception $e) {
+    http_response_code(500);
+    $logger = new Logger(route: $this->route);
+    $logger->logError("Unexpected error in announcements endpoint: " . $e->getMessage());
+    echo json_encode([
+        'success' => false,
+        'message' => 'An unexpected error occurred'
+    ]);
 }
+
+// @codeCoverageIgnoreEnd

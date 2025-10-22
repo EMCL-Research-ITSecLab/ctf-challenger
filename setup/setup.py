@@ -1,3 +1,7 @@
+import hashlib
+import random
+import string
+
 import requests
 from dotenv import load_dotenv
 import os
@@ -5,6 +9,7 @@ from proxmoxer import ProxmoxAPI
 import subprocess
 import datetime
 import sys
+import re
 
 load_dotenv()
 
@@ -20,8 +25,7 @@ PROXMOX_INTERNAL_IP = os.getenv("PROXMOX_INTERNAL_IP", "10.0.3.4")
 PROXMOX_EXTERNAL_IP = os.getenv("PROXMOX_EXTERNAL_IP", "10.0.3.4")
 PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 
-UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL", "https://heibox.uni-heidelberg.de/f/aa4f76f2eb9649cdb686"
-                                                             "/?dl=1")
+UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
 DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/ctf-challenger/database")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
@@ -68,6 +72,28 @@ BACKEND_AUTHENTICATION_TOKEN = os.getenv("BACKEND_AUTHENTICATION_TOKEN")
 CHALLENGES_ROOT_SUBNET = os.getenv("CHALLENGES_ROOT_SUBNET", "10.128.0.0")
 CHALLENGES_ROOT_SUBNET_MASK = os.getenv("CHALLENGES_ROOT_SUBNET_MASK", "255.128.0.0")
 
+TESTING_FILES_DIR = os.path.join(BACKEND_FILES_DIR, "tests", "utils")
+TESTING_DATABASE_BASE_DIR = os.getenv("TESTING_DATABASE_BASE_DIR", "/tmp/pg_test_base")
+TESTING_DATABASE_NAME = os.getenv("TESTING_DATABASE_NAME", "ctf_challenger")
+TESTING_DATABASE_USER = os.getenv("TESTING_DATABASE_USER", "postgres")
+TESTING_DATABASE_PASSWORD = os.getenv("TESTING_DATABASE_PASSWORD")
+TESTING_DATABASE_PORT = os.getenv("TESTING_DATABASE_PORT", "5432")
+TESTING_DATABASE_HOST = os.getenv("TESTING_DATABASE_HOST", "localhost")
+
+WEBSERVER_DATABASE_USER = os.getenv("WEBSERVER_DATABASE_USER", "api_user")
+WEBSERVER_DATABASE_PASSWORD = os.getenv("WEBSERVER_DATABASE_PASSWORD")
+
+MONITORING_VPN_INTERFACE = os.getenv("MONITORING_VPN_INTERFACE", "ctf_monitoring")
+MONITORING_DMZ_INTERFACE = os.getenv("MONITORING_DMZ_INTERFACE", "dmz_monitoring")
+MONITORING_HOST = os.getenv("MONITORING_HOST", "10.0.0.103")
+WAZUH_PORT = os.getenv("WAZUH_API_PORT", "55000")
+WAZUH_USER = os.getenv("WAZUH_API_USER", "wazuh-wui")
+WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
+WAZUH_ENROLLMENT_PASSWORD = os.getenv("WAZUH_ENROLLMENT_PASSWORD", "")
+
+
+REUSE_DOWNLOADED_OVA = True
+
 time_start = datetime.datetime.now()
 
 
@@ -97,13 +123,13 @@ def setup():
     allow_ova_upload_to_proxmox()
 
     print("\nSetting up Proxmox API token")
-    api_token = setup_api_token()
+    backend_api_token, web_server_api_token = setup_api_token()
 
     print("\nSetting up backend network")
-    setup_backend_network(api_token)
+    setup_backend_network(backend_api_token)
 
     print("\nGenerating and distributing environment files")
-    generate_and_distribute_env_files(api_token)
+    generate_and_distribute_env_files(backend_api_token, web_server_api_token)
 
     print("\nSetting up backend DNSMasq")
     setup_backend_dnsmasq()
@@ -112,7 +138,7 @@ def setup():
     setup_openvpn_server()
 
     print("\nSetting up web and database server")
-    webserver_id, database_id = setup_web_and_database_server(api_token)
+    webserver_id, database_id = setup_web_and_database_server(backend_api_token)
 
     print("\nSetting up iptables")
     setup_iptables()
@@ -124,7 +150,7 @@ def setup():
     setup_webserver()
 
     print("\nSetting up OpenVPN server")
-    validate_running_and_reachable(webserver_id, database_id, api_token)
+    validate_running_and_reachable(webserver_id, database_id, backend_api_token)
 
     print("\nSetting up database")
     setup_database()
@@ -144,8 +170,29 @@ def install_dependencies():
 
     subprocess.run(["timedatectl", "set-timezone", "Europe/Berlin"], check=True, capture_output=True)
 
-    print("\tInstalling ntpdate")
-    subprocess.run(["apt", "install", "-y", "ntpdate"], check=True, capture_output=True)
+    # Detect Debian version
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("DEBIAN_VERSION_FULL="):
+                    debian_version = line.strip().split("=")[1].strip('"')
+                    break
+            else:
+                debian_version = "0"  # fallback if not found
+    except FileNotFoundError:
+        debian_version = "0"
+
+    print(f"\tDetected Debian version: {debian_version}")
+
+    # Install appropriate ntpdate package
+    if subprocess.run(["dpkg", "--compare-versions", debian_version, "ge", "13.0"]).returncode == 0:
+        print("\tInstalling ntpsec-ntpdate (Debian >= 13)")
+        subprocess.run(["apt", "update"], check=True, capture_output=True)
+        subprocess.run(["apt", "install", "-y", "ntpsec-ntpdate"], check=True, capture_output=True)
+    else:
+        print("\tInstalling legacy ntpdate (Debian < 13)")
+        subprocess.run(["apt", "update"], check=True, capture_output=True)
+        subprocess.run(["apt", "install", "-y", "ntpdate"], check=True, capture_output=True)
 
     print("\tSynchronizing time with NTP server")
     subprocess.run(["ntpdate", "time.google.com"], check=True, capture_output=True)
@@ -156,24 +203,24 @@ def install_dependencies():
     print("\tUpdating package list")
     subprocess.run(["apt", "update"], check=True, capture_output=True)
 
-    # Install OpenVPN
-    print("\tInstalling OpenVPN")
-    subprocess.run(["apt", "install", "-y", "openvpn"], check=True, capture_output=True)
+    packages = [
+        ("OpenVPN", ["openvpn"]),
+        ("Easy-RSA", ["easy-rsa"]),
+        ("dnsmasq", ["dnsmasq"]),
+        ("iptables", ["iptables"]),
+        ("sshpass", ["sshpass"]),
+        ("postgres (used in testing)", ["postgresql", "postgresql-contrib"]),
+        ("sudo (used in testing)", ["sudo"]),
+        ("scapy (used in testing)", ["python3-scapy"]),
+    ]
 
-    print("\tInstalling Easy-RSA")
-    subprocess.run(["apt", "install", "-y", "easy-rsa"], check=True, capture_output=True)
+    for desc, pkgs in packages:
+        print(f"\tInstalling {desc}")
+        subprocess.run(["apt", "install", "-y"] + pkgs, check=True, capture_output=True)
 
-    # Install dnsmasq
-    print("\tInstalling dnsmasq")
-    subprocess.run(["apt", "install", "-y", "dnsmasq"], check=True, capture_output=True)
-
-    # Install iptables
-    print("\tInstalling iptables")
-    subprocess.run(["apt", "install", "-y", "iptables"], check=True, capture_output=True)
-
-    # Install sshpass
-    print("\tInstalling sshpass")
-    subprocess.run(["apt", "install", "-y", "sshpass"], check=True, capture_output=True)
+    # Stop and disable PostgreSQL
+    subprocess.run(["systemctl", "stop", "postgresql"], check=True, capture_output=True)
+    subprocess.run(["systemctl", "disable", "postgresql"], check=True, capture_output=True)
 
 
 def setup_backend_certificate():
@@ -215,8 +262,10 @@ lvmthin: local-lvm
 
 def setup_api_token():
     """
-    Setup the Proxmox API token.
+    Setup the Backend API token.
     """
+
+    print("\tSetting up setup API token")
 
     proxmox = ProxmoxAPI("localhost", user=PROXMOX_USER, password=PROXMOX_PASSWORD, verify_ssl=False)
 
@@ -230,9 +279,44 @@ def setup_api_token():
         privsep=privsep
     )
 
-    token = {"user": user_id, "token_name": token_id, "token_value": result["value"]}
+    backend_token = {"user": user_id, "token_name": token_id, "token_value": result["value"]}
 
-    return token
+
+    print("\tSetting up web server API token")
+
+    user_id = f"{PROXMOX_USER}"
+    token_id = f"webserver-token"
+    comment = "Webserver API token"
+    privsep = 1
+
+    result = proxmox.access.users(user_id).token(token_id).post(
+        comment=comment,
+        privsep=privsep
+    )
+
+    role_id = "webserver-role"
+
+    proxmox.access.roles.post(
+        roleid=role_id,
+        privs="Datastore.AllocateTemplate"
+    )
+
+    print("\tRestricting web server API token permissions")
+
+    permissions = [
+        {"path": f"/storage/local", "roles": role_id, "tokens": f"{user_id}!{token_id}"},
+    ]
+
+    for perm in permissions:
+        proxmox.access.acl.put(
+            path=perm["path"],
+            roles=perm["roles"],
+            tokens=perm["tokens"],
+        )
+
+    web_server_token = {"user": user_id, "token_name": token_id, "token_value": result["value"]}
+
+    return backend_token, web_server_token
 
 
 def setup_backend_network(api_token):
@@ -258,18 +342,18 @@ def setup_backend_network(api_token):
         pass
 
 
-def generate_and_distribute_env_files(api_token):
+def generate_and_distribute_env_files(backend_api_token, web_server_api_token):
     """
     Generate and distribute the environment files.
     """
 
-    api_token_string = f"{api_token['user']}!{api_token['token_name']}={api_token['token_value']}"
+    backend_api_token_string = f"{backend_api_token['user']}!{backend_api_token['token_name']}={backend_api_token['token_value']}"
+    web_server_api_token_string = f"{web_server_api_token['user']}!{web_server_api_token['token_name']}={web_server_api_token['token_value']}"
 
     # Generate the .env files for the database and webserver
     print("\tGenerating webserver .env file")
     with open(os.path.join(WEBSERVER_FILES_DIR, ".env"), "w") as web_env_file:
-        web_env_file.write(f"PROXMOX_USER='{PROXMOX_USER}'\n")
-        web_env_file.write(f"PROXMOX_PASSWORD='{PROXMOX_PASSWORD}'\n")
+        web_env_file.write(f"PROXMOX_API_TOKEN='{web_server_api_token_string}'\n")
         web_env_file.write(f"PROXMOX_HOST='{PROXMOX_HOST}'\n")
         web_env_file.write(f"PROXMOX_PORT='{PROXMOX_PORT}'\n")
         web_env_file.write(f"PROXMOX_HOSTNAME='{PROXMOX_HOSTNAME}'\n")
@@ -280,9 +364,10 @@ def generate_and_distribute_env_files(api_token):
 
         web_env_file.write(f"DB_HOST='{DATABASE_HOST}'\n")
         web_env_file.write(f"DB_NAME='{DATABASE_NAME}'\n")
-        web_env_file.write(f"DB_USER='{DATABASE_USER}'\n")
-        web_env_file.write(f"DB_PASSWORD='{DATABASE_PASSWORD}'\n")
+        web_env_file.write(f"DB_USER='{WEBSERVER_DATABASE_USER}'\n")
+        web_env_file.write(f"DB_PASSWORD='{WEBSERVER_DATABASE_PASSWORD}'\n")
         web_env_file.write(f"DB_PORT='{DATABASE_PORT}'\n")
+
 
     print("\tGenerating backend .env file")
     with open(os.path.join(BACKEND_FILES_DIR, ".env"), "w") as backend_env_file:
@@ -300,11 +385,43 @@ def generate_and_distribute_env_files(api_token):
         backend_env_file.write(f"DB_PORT='{DATABASE_PORT}'\n")
 
         backend_env_file.write(f"PROXMOX_URL='https://localhost:8006'\n")
-        backend_env_file.write(f"PROXMOX_API_TOKEN='{api_token_string}'\n")
+        backend_env_file.write(f"PROXMOX_API_TOKEN='{backend_api_token_string}'\n")
         backend_env_file.write(f"PROXMOX_HOSTNAME='{PROXMOX_HOSTNAME}'\n")
 
         backend_env_file.write(f"VPN_SERVER_IP='{PROXMOX_EXTERNAL_IP}'\n")
 
+        backend_env_file.write(f"MONITORING_VPN_INTERFACE='{MONITORING_VPN_INTERFACE}'\n")
+        backend_env_file.write(f"MONITORING_DMZ_INTERFACE='{MONITORING_DMZ_INTERFACE}'\n")
+        backend_env_file.write(f"MONITORING_HOST='{MONITORING_HOST}'\n")
+        backend_env_file.write(f"WAZUH_API_PORT='{WAZUH_PORT}'\n")
+        backend_env_file.write(f"WAZUH_API_USER='{WAZUH_USER}'\n")
+        backend_env_file.write(f"WAZUH_API_PASSWORD='{WAZUH_PASSWORD}'\n")
+        backend_env_file.write(f"WAZUH_ENROLLMENT_PASSWORD='{WAZUH_ENROLLMENT_PASSWORD}'\n")
+
+    print("\tGenerating testing .env file")
+    with open(os.path.join(TESTING_FILES_DIR, ".env"), "w") as testing_env_file:
+        testing_env_file.write(f"PROXMOX_USER='{PROXMOX_USER}'\n")
+        testing_env_file.write(f"PROXMOX_PASSWORD='{PROXMOX_PASSWORD}'\n")
+        testing_env_file.write(f"PROXMOX_HOST='{PROXMOX_HOST}'\n")
+        testing_env_file.write(f"PROXMOX_PORT='{PROXMOX_PORT}'\n")
+        testing_env_file.write(f"PROXMOX_HOSTNAME='{PROXMOX_HOSTNAME}'\n")
+        testing_env_file.write(f"PROXMOX_URL='https://localhost:8006'\n")
+        testing_env_file.write(f"PROXMOX_API_TOKEN='{backend_api_token_string}'\n")
+
+        testing_env_file.write(f"DB_HOST='{DATABASE_HOST}'\n")
+        testing_env_file.write(f"DB_NAME='{DATABASE_NAME}'\n")
+        testing_env_file.write(f"DB_USER='{DATABASE_USER}'\n")
+        testing_env_file.write(f"DB_PASSWORD='{DATABASE_PASSWORD}'\n")
+        testing_env_file.write(f"DB_PORT='{DATABASE_PORT}'\n")
+
+        testing_env_file.write(f"BACKEND_HOST='{PROXMOX_HOST}'\n")
+        testing_env_file.write(f"BACKEND_PORT='{BACKEND_PORT}'\n")
+        testing_env_file.write(f"BACKEND_LOGGING_DIR='{BACKEND_FILES_DIR}'\n")
+        testing_env_file.write(f"BACKEND_CERTIFICATE_FILE='{BACKEND_CERTIFICATE_FILE}'\n")
+        testing_env_file.write(f"BACKEND_CERTIFICATE_KEY_FILE='{BACKEND_CERTIFICATE_KEY_FILE}'\n")
+        testing_env_file.write(f"BACKEND_AUTHENTICATION_TOKEN='{BACKEND_AUTHENTICATION_TOKEN}'\n")
+
+        testing_env_file.write(f"VPN_SERVER_IP='{PROXMOX_EXTERNAL_IP}'\n")
 
 
 def setup_backend_dnsmasq():
@@ -361,9 +478,9 @@ def setup_iptables():
 
     # Enable IP forwarding
     print("\tEnabling IP forwarding")
-    subprocess.run(["sed", "-i", "s/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/", "/etc/sysctl.conf"], check=True,
-                   capture_output=True)
-    subprocess.run(["sysctl", "-p"], check=True, capture_output=True)
+    with open("/etc/sysctl.d/99-sysctl.conf", "a") as sysctl_file:
+        sysctl_file.write("\nnet.ipv4.ip_forward=1\n")
+    subprocess.run(["sysctl", "--system"], check=True, capture_output=True)
 
     print("\tSetting up iptables rules")
     iptables_script_dir = "/etc/iptables-backend"
@@ -380,6 +497,9 @@ iptables -t nat -X
 iptables -P INPUT ACCEPT
 iptables -P FORWARD DROP
 iptables -P OUTPUT ACCEPT
+
+# Disallow traffic to the host from the VPN
+iptables -A INPUT -i tun0 -j DROP
 
 # Enable forwarding of internal connections
 iptables -A FORWARD -i {BACKEND_NETWORK_DEVICE} -o {BACKEND_NETWORK_DEVICE} -j ACCEPT
@@ -406,7 +526,7 @@ iptables -A FORWARD -p tcp -s {WEBSERVER_HOST} --sport 443 -m state --state ESTA
 
 # Allow internet access for the webserver and database server
 iptables -t nat -A POSTROUTING -s {BACKEND_NETWORK_SUBNET} -o vmbr0 -j MASQUERADE
-iptables -A FORWARD -i vmbr0 -o {BACKEND_NETWORK_DEVICE} -m conntrack --ctstate RELATEDESTABLISHED -j ACCEPT
+iptables -A FORWARD -i vmbr0 -o {BACKEND_NETWORK_DEVICE} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -A FORWARD -i {BACKEND_NETWORK_DEVICE} -o vmbr0 -j ACCEPT
 """
 
@@ -480,7 +600,7 @@ def setup_web_and_database_server(api_token):
     database_id = 2000
 
     # Download the Ubuntu Base Server OVA if it doesn't exist
-    if os.path.exists("ubuntu-base-server"):
+    if os.path.exists("ubuntu-base-server") and not REUSE_DOWNLOADED_OVA:
         subprocess.run(["rm", "-rf", "ubuntu-base-server"], check=True, capture_output=True)
 
     download_ubuntu_base_server_ova()
@@ -512,8 +632,9 @@ def setup_web_and_database_server(api_token):
     print("\tConfiguring webserver")
     proxmox.nodes(PROXMOX_HOSTNAME).qemu(webserver_id).config.put(
         name='WebServer',
-        cores=1,
-        memory=2048,
+        cpu='kvm64',
+        cores=4,
+        memory=1024 * 16,
         net0=f'virtio,bridge={BACKEND_NETWORK_DEVICE},macaddr={WEBSERVER_MAC_ADDRESS}',
         ipconfig0=f'ip={WEBSERVER_HOST}/24,gw={BACKEND_NETWORK_ROUTER}',
     )
@@ -522,8 +643,9 @@ def setup_web_and_database_server(api_token):
     print("\tConfiguring database server")
     proxmox.nodes(PROXMOX_HOSTNAME).qemu(database_id).config.put(
         name='DatabaseServer',
-        cores=1,
-        memory=2048,
+        cpu='kvm64',
+        cores=4,
+        memory=1024 * 32,
         net0=f'virtio,bridge={BACKEND_NETWORK_DEVICE},macaddr={DATABASE_MAC_ADDRESS}',
         ipconfig0=f'ip={DATABASE_HOST}/24,gw={BACKEND_NETWORK_ROUTER}',
     )
@@ -687,6 +809,13 @@ def setup_database_server():
         except Exception:
             pass
 
+    print("\tStopping unattended-upgrades service on database server")
+    try:
+        execute_command("sudo systemctl stop unattended-upgrades")
+        execute_command("sudo systemctl disable unattended-upgrades")
+    except Exception as e:
+        print(f"\tFailed to stop unattended-upgrades: {e}")
+
     # Synchronize the time with NTP server
     print("\tSynchronizing server time with NTP server")
     execute_command("sudo timedatectl set-timezone Europe/Berlin")
@@ -809,6 +938,13 @@ def setup_webserver():
         except Exception:
             pass
 
+    print("\tStopping unattended-upgrades service on webserver")
+    try:
+        execute_command("sudo systemctl stop unattended-upgrades")
+        execute_command("sudo systemctl disable unattended-upgrades")
+    except Exception as e:
+        print(f"\tFailed to stop unattended-upgrades: {e}")
+
     os.makedirs(f"{WEBSERVER_FILES_DIR}/html/uploads", exist_ok=True)
     os.makedirs(f"{WEBSERVER_FILES_DIR}/html/uploads/avatars", exist_ok=True)
 
@@ -822,7 +958,7 @@ def setup_webserver():
     # Install Apache, PHP, and composer on the webserver
     print("\tInstalling Apache, PHP, and composer on the webserver")
     execute_command("sudo apt update")
-    execute_command("sudo apt install apache2 php libapache2-mod-php php-curl php-pgsql php-xml composer -y")
+    execute_command("sudo apt install apache2 php libapache2-mod-php php-curl php-pgsql php-xml php-mbstring php-xdebug php-sockets php-imagick composer -y")
 
     # Enable Apache modules
     print("\tEnabling Apache modules")
@@ -877,41 +1013,41 @@ def setup_webserver():
     execute_command("sudo rm -rf /var/www/html")
     execute_command("sudo mv /tmp/html /var/www/html")
 
-    # Transfer ownership of the webserver files to the webserver user
-    print("\tSetting ownership of webserver files")
-    execute_command("sudo chown www-data:www-data /etc/apache2/mods-available/mpm_event.conf")
-    execute_command("sudo chmod 755 /etc/apache2/mods-available/mpm_event.conf")
-
-    execute_command(f"sudo chown www-data:www-data /etc/php/{php_version}/apache2/php.ini")
-    execute_command("sudo chmod 755 /etc/apache2/apache2.conf")
-
-    execute_command("sudo chown -R www-data:www-data /var/www/html/")
-    execute_command("sudo chmod -R 755 /var/www/html/")
-
-    execute_command("sudo chown www-data:www-data /var/www/.env")
-    execute_command("sudo chmod 644 /var/www/.env")
-
-    execute_command("sudo chown www-data:www-data /etc/apache2/sites-available/000-default.conf")
-    execute_command("sudo chmod 644 /etc/apache2/sites-available/000-default.conf")
-
-    print("\tCreating directories for the vpn-configs and logs")
-    execute_command("sudo mkdir -p /var/lib/ctf-challenger/vpn-configs")
-    execute_command("sudo mkdir -p /var/log/ctf-challenger")
-    execute_command("sudo chown -R www-data:www-data /var/lib/ctf-challenger/vpn-configs")
-    execute_command("sudo chown -R www-data:www-data /var/log/ctf-challenger")
-    execute_command("sudo chmod 755 /var/lib/ctf-challenger/vpn-configs")
-    execute_command("sudo chmod 755 /var/log/ctf-challenger")
+    execute_command("sudo chown -R www-data:www-data /var/www/html")
 
     print("\tSetting up vendor directory using composer")
-    execute_command(
-        "sudo -u www-data composer init "
-        "--working-dir=/var/www/html "
-        "--name='ctf-challenger/webserver' "
-        "--no-interaction"
-    )
-    execute_command("sudo -u www-data composer require --working-dir=/var/www/html vlucas/phpdotenv phpunit/phpunit")
     execute_command("sudo -u www-data composer update --working-dir=/var/www/html")
     execute_command("sudo -u www-data composer install --working-dir=/var/www/html")
+    execute_command("sudo -u www-data composer dump-autoload --working-dir=/var/www/html")
+
+    # Transfer ownership of the webserver files to the webserver user
+    print("\tSetting ownership of webserver files")
+    execute_command("sudo chown root:root /etc/apache2/mods-available/mpm_event.conf")
+    execute_command("sudo chmod 644 /etc/apache2/mods-available/mpm_event.conf")
+
+    execute_command(f"sudo chown root:root /etc/php/{php_version}/apache2/php.ini")
+    execute_command("sudo chmod 644 /etc/apache2/apache2.conf")
+
+    execute_command("sudo chown -R root:root /var/www/html/")
+    execute_command("sudo chmod -R 755 /var/www/html/")
+
+    execute_command("sudo chown -R www-data:www-data /var/www/html/vendor")
+    execute_command("sudo chmod -R 755 /var/www/html/vendor")
+
+    execute_command("sudo chown -R www-data:www-data /var/www/html/uploads")
+    execute_command("sudo chmod -R 755 /var/www/html/uploads")
+
+    execute_command("sudo chown root:root /var/www/.env")
+    execute_command("sudo chmod 644 /var/www/.env")
+
+    execute_command("sudo chown root:root /var/www/html")
+
+    print("\tCreating directories for the logs")
+    execute_command("sudo mkdir -p /var/log/ctf-challenger")
+    execute_command("sudo chown -R www-data:www-data /var/log/ctf-challenger")
+    execute_command("sudo chmod 755 /var/log/ctf-challenger")
+
+
 
     # Copy the backend certificate as trusted
     print("\tCopying backend certificate as trusted")
@@ -926,17 +1062,14 @@ def setup_webserver():
 
     execute_command("sudo update-ca-certificates")
 
-    # Moving composer files out of webroot
-    execute_command("sudo mv /var/www/html/composer.json /var/www/composer.json")
-    execute_command("sudo mv /var/www/html/composer.lock /var/www/composer.lock")
-
     # Generate a self-signed certificate for HTTPS
     print("\tGenerating self-signed SSL certificate")
     execute_command(
-        "sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
-        "-keyout /etc/ssl/private/apache-selfsigned.key "
-        "-out /etc/ssl/certs/apache-selfsigned.crt "
-        "-subj \"/C=US/ST=Denial/L=Springfield/O=Dis/CN=localhost\""
+        'sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 '
+        '-keyout /etc/ssl/private/apache-selfsigned.key '
+        '-out /etc/ssl/certs/apache-selfsigned.crt '
+        '-subj "/CN=localhost" '
+        '-addext "subjectAltName=DNS:localhost,IP:127.0.0.1"'
     )
 
     # Configure Apache for HTTPS
@@ -951,6 +1084,36 @@ def setup_webserver():
         "/tmp/default-ssl.conf"
     )
     execute_command("sudo mv /tmp/default-ssl.conf /etc/apache2/sites-available/default-ssl.conf")
+
+    execute_command("sudo chown -R root:root /etc/apache2/sites-available")
+    execute_command("sudo chmod -R 755 /etc/apache2/sites-available")
+
+    print("\tHardening Apache headers to hide version and X-Powered-By")
+    # 1) Set ServerTokens Prod and ServerSignature Off
+    execute_command(
+        "sudo sed -i 's/^ServerTokens.*/ServerTokens Prod/' /etc/apache2/conf-available/security.conf || echo 'ServerTokens Prod' | sudo tee -a /etc/apache2/conf-available/security.conf")
+    execute_command(
+        "sudo sed -i 's/^ServerSignature.*/ServerSignature Off/' /etc/apache2/conf-available/security.conf || echo 'ServerSignature Off' | sudo tee -a /etc/apache2/conf-available/security.conf")
+
+    # 2) Disable PHP X-Powered-By for all installed PHP versions
+    execute_command(
+        "for f in /etc/php/*/apache2/php.ini; do sudo sed -i 's/^expose_php.*/expose_php = Off/' \"$f\" || echo 'expose_php = Off' | sudo tee -a \"$f\"; done")
+
+    # 3) Enable mod_headers and unset extra headers
+    execute_command("sudo a2enmod headers")
+    execute_command("""
+sudo tee /etc/apache2/conf-available/headers-hardening.conf <<'EOF'
+<IfModule mod_headers.c>
+   Header unset X-Powered-By
+   Header unset X-AspNet-Version
+   Header unset X-AspNetMvc-Version
+</IfModule>
+EOF
+    """)
+    execute_command("sudo a2enconf headers-hardening")
+
+    # 4) Reload Apache to apply changes
+    execute_command("sudo systemctl reload apache2")
 
     # Restart Apache
     print("\tRestarting Apache")
@@ -1069,22 +1232,115 @@ def validate_running_and_reachable(webserver_id, database_id, api_token, timeout
         raise Exception("Database server is not reachable.")
 
 
-def setup_database():
+def generate_udf_migration(
+    sql_dir: str,
+    output_file: str,
+    target_schema: str,
+    owner_role: str,
+    limited_user: str,
+    limited_user_password: str,
+    database_name: str,
+):
+    """
+    Generate a migration SQL script that:
+      - Moves functions from 'public' schema to a dedicated schema.
+      - Sets the owner and SECURITY DEFINER.
+      - Creates and configures a restricted user with limited access.
+
+    Args:
+        sql_dir: Directory containing .sql files with function definitions.
+        output_file: Path for the generated migration SQL file.
+        target_schema: Schema to move the functions into.
+        owner_role: Database role that will own and define the functions.
+        limited_user: Name of the restricted user to create.
+        limited_user_password: Password for the restricted user.
+        database_name: Target database for privilege revocation and grants.
+    """
+    func_pattern = re.compile(
+        r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+([\w\.]+)\s*\(([^)]*)\)",
+        re.IGNORECASE
+    )
+
+    def parse_functions(sql_text):
+        funcs = []
+        for match in func_pattern.finditer(sql_text):
+            fullname = match.group(1).strip()
+            args = match.group(2).strip()
+            args = re.sub(r"\s+", " ", args)
+            funcs.append((fullname, args))
+        return funcs
+
+    all_funcs = []
+
+    for root, _, files in os.walk(sql_dir):
+        for file in files:
+            if file.endswith(".sql"):
+                with open(os.path.join(root, file), "r", encoding="utf-8") as f:
+                    sql = f.read()
+                    funcs = parse_functions(sql)
+                    if funcs:
+                        all_funcs.extend(funcs)
+
+    with open(output_file, "w", encoding="utf-8") as out:
+        out.write(f"-- Auto-generated migration script\n")
+        out.write(f"-- Moves functions to schema '{target_schema}', "
+                  f"sets owner '{owner_role}', and configures restricted user '{limited_user}'\n\n")
+
+        # 1. Create target schema
+        out.write(f"CREATE SCHEMA IF NOT EXISTS {target_schema} AUTHORIZATION {owner_role};\n\n")
+
+        # 2. Alter functions
+        for fullname, args in all_funcs:
+            func_name = fullname.split(".")[-1]
+            out.write(f"ALTER FUNCTION public.{func_name}({args}) SET SCHEMA {target_schema};\n")
+            out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) OWNER TO {owner_role};\n")
+            out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) SECURITY DEFINER;\n\n")
+
+        # 3. Create restricted user and configure privileges
+        out.write(f"-- Create restricted user if not exists\n")
+        out.write(f"DO $$ BEGIN\n")
+        out.write(f"   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{limited_user}') THEN\n")
+        out.write(f"      CREATE USER {limited_user} WITH PASSWORD '{limited_user_password}' "
+                  f"NOCREATEDB NOCREATEROLE NOINHERIT;\n")
+        out.write(f"   END IF;\n")
+        out.write(f"END $$;\n\n")
+
+        out.write(f"-- Revoke public privileges\n")
+        out.write(f"REVOKE ALL ON DATABASE {database_name} FROM PUBLIC;\n")
+        out.write(f"REVOKE ALL ON SCHEMA public FROM PUBLIC;\n")
+        out.write(f"REVOKE ALL ON SCHEMA {target_schema} FROM PUBLIC;\n\n")
+
+        out.write(f"-- Grant restricted permissions\n")
+        out.write(f"GRANT USAGE ON SCHEMA {target_schema} TO {limited_user};\n")
+        out.write(f"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {target_schema} TO {limited_user};\n\n")
+        out.write(f"GRANT CONNECT ON DATABASE {database_name} TO {limited_user};\n\n")
+        out.write(f"ALTER ROLE {limited_user} SET search_path = {target_schema}, public;\n\n")
+
+        out.write(f"-- Ensure future functions inherit EXECUTE for limited user\n")
+        out.write(f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA {target_schema}\n")
+        out.write(f"GRANT EXECUTE ON FUNCTIONS TO {limited_user};\n")
+
+
+def setup_database(conn=None, create_admin_config=True):
     """
     Setup the database.
     """
 
-    import psycopg2
+    connection_managed_externally = conn is not None
 
-    conn = psycopg2.connect(
-        dbname=DATABASE_NAME,
-        user=DATABASE_USER,
-        password=DATABASE_PASSWORD,
-        host=DATABASE_HOST,
-        port=DATABASE_PORT
-    )
+    if not conn:
+        import psycopg2
 
-    print("\tReading init.sql file")
+        conn = psycopg2.connect(
+            dbname=DATABASE_NAME,
+            user=DATABASE_USER,
+            password=DATABASE_PASSWORD,
+            host=DATABASE_HOST,
+            port=DATABASE_PORT
+        )
+
+    if not connection_managed_externally:
+        print("\tReading init.sql file")
     init_sql_path = os.path.join(DATABASE_FILES_DIR, "init.sql")
     if not os.path.exists(init_sql_path):
         raise FileNotFoundError(f"SQL file not found: {init_sql_path}")
@@ -1092,32 +1348,66 @@ def setup_database():
     with open(init_sql_path, "r") as file:
         init_script = file.read()
 
-    print("\tExecuting init.sql script")
+    if not connection_managed_externally:
+        print("\tExecuting init.sql script")
     with conn.cursor() as cursor:
         cursor.execute(init_script)
+
+    for functions_file in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions")):
+        if functions_file.endswith(".sql"):
+            if not connection_managed_externally:
+                print(f"\tExecuting functions/{functions_file} script")
+            with open(os.path.join(DATABASE_FILES_DIR, "functions", functions_file), "r") as file:
+                functions_script = file.read()
+            with conn.cursor() as cursor:
+                cursor.execute(functions_script)
+
+    if not connection_managed_externally:
+        print("\tGenerating and executing UDF migration script")
+    database_functions_path = os.path.join(DATABASE_FILES_DIR, "functions")
+    udf_migration_path = os.path.join(DATABASE_FILES_DIR, "migrate_functions.sql")
+    generate_udf_migration(
+        sql_dir=database_functions_path,
+        output_file=udf_migration_path,
+        target_schema="api",
+        owner_role="postgres",
+        limited_user=WEBSERVER_DATABASE_USER,
+        limited_user_password=WEBSERVER_DATABASE_PASSWORD,
+        database_name=DATABASE_NAME
+    )
+    with open(udf_migration_path, "r") as file:
+        udf_migration_script = file.read()
+    with conn.cursor() as cursor:
+        cursor.execute(udf_migration_script)
 
     conn.commit()
 
     # Setup the website admin user
-    print("\tSetting up website admin user")
+    if not connection_managed_externally:
+        print("\tSetting up website admin user")
     with conn.cursor() as cursor:
+        WEBSITE_ADMIN_PASSWORD_SALT = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+        WEBSITE_ADMIN_PASSWORD_HASH = hashlib.sha512((WEBSITE_ADMIN_PASSWORD_SALT + WEBSITE_ADMIN_PASSWORD).encode()).hexdigest()
+
         cursor.execute(
-            f"INSERT INTO users (username, email, password_hash, is_admin) VALUES (%s, %s, crypt(%s, gen_salt('bf')), %s)",
-            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD, True))
+            f"INSERT INTO users (username, email, password_hash, password_salt, is_admin) VALUES (%s, %s, %s, %s, %s)",
+            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD_HASH, WEBSITE_ADMIN_PASSWORD_SALT, True))
 
     conn.commit()
 
     # Setup the challenge subnets and VPN static IPs
     from subnet_calculations import nth_challenge_subnet, nth_vpn_static_ip
 
-    print("\tGenerating challenge subnets")
+    if not connection_managed_externally:
+        print("\tGenerating challenge subnets")
     challenge_subnet_base = "10.128.0.0"
     challenge_subnets_sql = "INSERT INTO challenge_subnets (subnet, available) VALUES "
     for i in range(2 ** (32 - 9 - 8)):
         subnet = f"{nth_challenge_subnet(challenge_subnet_base, i)}"
         challenge_subnets_sql += f"('{subnet}', true)" + ("," if i < 2 ** (32 - 9 - 8) - 1 else ";")
 
-    print("\tGenerating VPN static IPs")
+    if not connection_managed_externally:
+        print("\tGenerating VPN static IPs")
     vpn_server_subnet = OPENVPN_SUBNET[:-3]
     vpn_static_ips_sql = "INSERT INTO vpn_static_ips (vpn_static_ip) VALUES "
     for i in range(2, 2 ** (32 - 16) - 1):
@@ -1125,15 +1415,18 @@ def setup_database():
         vpn_static_ips_sql += f"('{vpn_static_ip}')" + ("," if i < 2 ** (32 - 16) - 2 else ";")
 
     with conn.cursor() as cursor:
-        print("\tSetting up challenge subnets table")
+        if not connection_managed_externally:
+            print("\tSetting up challenge subnets table")
         cursor.execute(challenge_subnets_sql)
-        print("\tSetting up VPN static IPs table")
+        if not connection_managed_externally:
+            print("\tSetting up VPN static IPs table")
         cursor.execute(vpn_static_ips_sql)
 
     conn.commit()
 
     # Give vpn ip to admin user
-    print("\tGiving VPN IP to admin user")
+    if not connection_managed_externally:
+        print("\tGiving VPN IP to admin user")
     vpn_static_ip = nth_vpn_static_ip(OPENVPN_SUBNET[:-3], 2)
     with conn.cursor() as cursor:
         cursor.execute(f"UPDATE users SET vpn_static_ip = %s WHERE username = %s RETURNING id",
@@ -1142,13 +1435,18 @@ def setup_database():
         cursor.execute(f"UPDATE vpn_static_ips SET user_id = %s WHERE vpn_static_ip = %s",
                        (admin_user_id, vpn_static_ip))
 
-    from create_user_config import create_user_config
-    print("\tCreating user config")
-    create_user_config(admin_user_id, conn)
-    print("\tSaved admin vpn config to /etc/openvpn/client-configs/1.ovpn")
+    if create_admin_config:
+        from get_user_config import get_user_config
+        if not connection_managed_externally:
+            print("\tCreating user config")
+        get_user_config(admin_user_id, conn)
+        if not connection_managed_externally:
+            print("\tSaved admin vpn config to /etc/openvpn/client-configs/1.ovpn")
 
     conn.commit()
-    conn.close()
+
+    if not connection_managed_externally:
+        conn.close()
 
 
 def start_backend():
@@ -1209,6 +1507,18 @@ WantedBy=multi-user.target
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 2:
+        if sys.argv[2] == "-h" or sys.argv[2] == "--help":
+            print("Usage: python setup.py [--download-ova]")
+            sys.exit(0)
+
+        if len(sys.argv) != 3 or sys.argv[2] not in ["--download-ova"]:
+            print("Invalid arguments. Use --download-ova to download the OVA file.")
+            sys.exit(1)
+
+        if sys.argv[2] == "--download-ova":
+            REUSE_DOWNLOADED_OVA = False
+
     setup()
     time_end = datetime.datetime.now()
 

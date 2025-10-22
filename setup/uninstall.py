@@ -20,8 +20,7 @@ PROXMOX_INTERNAL_IP = os.getenv("PROXMOX_INTERNAL_IP", "10.0.3.4")
 PROXMOX_EXTERNAL_IP = os.getenv("PROXMOX_EXTERNAL_IP", "10.0.3.4")
 PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 
-UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL", "https://heibox.uni-heidelberg.de/f/aa4f76f2eb9649cdb686"
-                                                             "/?dl=1")
+UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
 DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/ctf-challenger/database")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")

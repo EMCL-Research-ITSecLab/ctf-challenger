@@ -85,7 +85,7 @@ def deploy_logrotate_config():
     endscript
 }}
 
-{PCAP_DIR}/*.pcap {{
+{PCAP_DIR}/*.pcap.[0-9]* {{
     daily
     size 5G
     rotate {ROTATE_DAYS}

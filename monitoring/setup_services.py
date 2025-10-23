@@ -63,7 +63,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/suricata -c {SURICATA_VPN_YAML} -i {VPN_MONITORING_DEVICE}
+ExecStart=/usr/bin/suricata -c {SURICATA_VPN_YAML} -i {VPN_MONITORING_DEVICE} --pidfile /var/run/suricata-vpn.pid
 Restart=always
 
 [Install]
@@ -76,7 +76,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/suricata -c {SURICATA_DMZ_YAML} -i {DMZ_MONITORING_DEVICE}
+ExecStart=/usr/bin/suricata -c {SURICATA_DMZ_YAML} -i {DMZ_MONITORING_DEVICE} --pidfile /var/run/suricata-dmz.pid
 Restart=always
 
 [Install]
@@ -89,7 +89,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/suricata -c {SURICATA_BACKEND_YAML} -q 0 --runmode=workers
+ExecStart=/usr/bin/suricata -c {SURICATA_BACKEND_YAML} -q 0 --runmode=workers --pidfile /var/run/suricata-backend.pid
 Restart=always
 
 [Install]

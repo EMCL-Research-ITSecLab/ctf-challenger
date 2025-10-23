@@ -68,18 +68,26 @@ def deploy_logrotate_config():
     config_content = f"""
 {SURICATA_LOG_DIR}/*.json {{
     daily
+    size 5G
     rotate {ROTATE_DAYS}
     compress
     delaycompress
     missingok
     notifempty
-    copytruncate
+    create 0640 root root
+    sharedscripts
     dateext
-    dateformat -%Y-%m-%d
+    dateformat -%Y-%m-%d-%s
+    postrotate
+        /bin/kill -HUP `cat /var/run/suricata-vpn.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-dmz.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-backend.pid 2>/dev/null` 2>/dev/null || true
+    endscript
 }}
 
 {PCAP_DIR}/*.pcap {{
     daily
+    size 5G
     rotate {ROTATE_DAYS}
     compress
     delaycompress
@@ -87,29 +95,30 @@ def deploy_logrotate_config():
     notifempty
     sharedscripts
     dateext
-    dateformat -%Y-%m-%d
+    dateformat -%Y-%m-%d-%s
     postrotate
-        for pidfile in /var/run/suricata*.pid; do
-            [ -f "$pidfile" ] && /bin/kill -HUP $(cat "$pidfile" 2>/dev/null) 2>/dev/null || true
-        done
+        /bin/kill -HUP `cat /var/run/suricata-vpn.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-dmz.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-backend.pid 2>/dev/null` 2>/dev/null || true
     endscript
 }}
 
 {SURICATA_LOG_DIR}/*.log {{
     daily
+    size 2G
     rotate {ROTATE_DAYS}
     compress
     delaycompress
     missingok
     notifempty
-    create 0640 {os.getlogin()} {os.getlogin()}
+    create 0640 root root
     sharedscripts
     dateext
-    dateformat -%Y-%m-%d
+    dateformat -%Y-%m-%d-%s
     postrotate
-        for pidfile in /var/run/suricata*.pid; do
-            [ -f "$pidfile" ] && /bin/kill -HUP $(cat "$pidfile" 2>/dev/null) 2>/dev/null || true
-        done
+        /bin/kill -HUP `cat /var/run/suricata-vpn.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-dmz.pid 2>/dev/null` 2>/dev/null || true
+        /bin/kill -HUP `cat /var/run/suricata-backend.pid 2>/dev/null` 2>/dev/null || true
     endscript
 }}
 """.strip()

@@ -123,7 +123,7 @@ END;
 $$;
 
 
-CREATE OR REPLACE FUNCTION validate_and_lock_flag(
+CREATE FUNCTION validate_and_lock_flag(
     p_challenge_template_id BIGINT,
     p_submitted_flag TEXT,
     p_user_id BIGINT

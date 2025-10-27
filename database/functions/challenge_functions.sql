@@ -125,7 +125,8 @@ $$;
 
 CREATE FUNCTION validate_and_lock_flag(
     p_challenge_template_id BIGINT,
-    p_submitted_flag TEXT
+    p_submitted_flag TEXT,
+    p_user_id BIGINT
 ) RETURNS TABLE (
     id BIGINT,
     points BIGINT
@@ -133,14 +134,28 @@ CREATE FUNCTION validate_and_lock_flag(
 LANGUAGE plpgsql
 SET plpgsql.variable_conflict = 'use_column'
 AS $$
+DECLARE
+    v_user_email TEXT;
 BEGIN
+    -- Get user email
+    SELECT u.email INTO v_user_email
+    FROM users u
+    WHERE u.id = p_user_id;
+
     RETURN QUERY
     SELECT
         cf.id::BIGINT AS id,
         cf.points::BIGINT AS points
     FROM challenge_flags cf
-    WHERE challenge_template_id = p_challenge_template_id
-    AND flag = p_submitted_flag
+    WHERE cf.challenge_template_id = p_challenge_template_id
+    AND (
+        -- Static flag: direct match
+        (cf.user_specific = false AND cf.flag = p_submitted_flag)
+        OR
+        -- User-specific flag: HMAC match
+        (cf.user_specific = true AND
+         'ITSEC{' || encode(hmac(v_user_email::bytea, cf.flag::bytea, 'sha1'), 'hex') || '}' = p_submitted_flag)
+    )
     FOR UPDATE;
 END;
 $$;
@@ -749,15 +764,3 @@ BEGIN
     WHERE id = p_challenge_id;
 END;
 $$;
-
-
-
-
-
-
-
-
-
-
-
-

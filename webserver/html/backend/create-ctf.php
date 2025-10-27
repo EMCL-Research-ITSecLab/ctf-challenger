@@ -328,6 +328,7 @@ class CtfCreationHandler
             }
         }
 
+        $flagOrderIndexes = []:
         foreach ($flags as $i => $flag) {
             $n = $i + 1;
             if (empty(trim($flag['flag'] ?? ''))) {
@@ -345,6 +346,44 @@ class CtfCreationHandler
 
             if (strlen($flag['description'] ?? '') > $this->generalConfig['ctf']['MAX_FLAG_DESCRIPTION_LENGTH']) {
                 $errors[] = "Flag #$n: Description cannot exceed " . $this->generalConfig['ctf']['MAX_FLAG_DESCRIPTION_LENGTH'];
+            }
+
+            $orderIndex = $flag['order_index'] ?? 0;
+            if (!is_numeric($orderIndex) || $orderIndex < 0) {
+                $errors[] = "Flag #$n: Order index must be 0 or greater";
+                $errorFields[] = 'flag-order';
+            } elseif ($orderIndex > $this->generalConfig['ctf']['MAX_ORDER_INDEX']) {
+                $errors[] = "Flag #$n: Order index cannot exceed " . $this->generalConfig['ctf']['MAX_ORDER_INDEX'];
+                $errorFields[] = 'flag-order';
+            } else {
+                if (in_array($orderIndex, $flagOrderIndexes)) {
+                    $errors[] = "Flag #$n: Order index $orderIndex is already used by another flag";
+                    $errorFields[] = 'flag-order';
+                }
+                $flagOrderIndexes[] = $orderIndex;
+            }
+
+            $isUserSpecific = (bool)$flag['user_specific'];
+            if ($isUserSpecific) {
+                $vmName = $flag['vm_name'] ?? null;
+
+                if (empty($vmName)) {
+                    $errors[] = "Flag #$n: A VM must be selected for user-specific flags";
+                    $errorFields[] = 'flag-vm';
+                } else {
+                    $vmExists = false;
+                    foreach ($vms as $vm) {
+                        if ($vm['name'] === $vmName) {
+                            $vmExists = true;
+                            break;
+                        }
+                    }
+
+                    if (!$vmExists) {
+                        $errors[] = "Flag #$n: Selected VM '$vmName' does not exist in the VM list";
+                        $errorFields[] = 'flag-vm';
+                    }
+                }
             }
         }
 
@@ -470,9 +509,9 @@ class CtfCreationHandler
 
         try {
             $challengeId = $this->insertChallengeTemplate($imagePath);
-            $this->processVMs($challengeId);
+            $vmIdMapping = $this->processVMs($challengeId);
             $this->processSubnets($challengeId);
-            $this->processFlags($challengeId);
+            $this->processFlags($challengeId, $vmIdMapping);
             $this->processHints($challengeId);
 
             $this->pdo->commit();
@@ -532,7 +571,7 @@ class CtfCreationHandler
         return $challengeId;
     }
 
-    private function processVMs(int $challengeId): void
+    private function processVMs(int $challengeId): array
     {
         $vms = $this->getValidatedJson('vms');
 
@@ -572,6 +611,7 @@ class CtfCreationHandler
             ]);
 
             $machineId = $stmt->fetchColumn();
+            $vmIdMapping[$vmName] = $machineId;
 
             if (!empty($vm['domain_name'])) {
                 $stmt = $this->pdo->prepare("
@@ -587,6 +627,8 @@ class CtfCreationHandler
                 ]);
             }
         }
+
+        return $vmIdMapping;
     }
 
     private function processSubnets(int $challengeId): void
@@ -642,18 +684,31 @@ class CtfCreationHandler
         }
     }
 
-    private function processFlags(int $challengeId): void
+    private function processFlags(int $challengeId, array $vmIdMapping): void
     {
         $flags = $this->getValidatedJson('flags');
 
         foreach ($flags as $flag) {
+            $machineTemplateId = null;
+
+            if ($flag['user_specific'] && !empty($flag['vm_name'])) {
+                $machineTemplateId = $vmIdMapping[$flag['vm_name']] ?? null;
+
+                if ($machineTemplateId === null) {
+                    $this->logger->logError("Machine template ID not found for VM: " . $flag['vm_name']);
+                    throw new CustomException('Failed to import machine templates', 500);
+                }
+            }
+
             $stmt = $this->pdo->prepare("
                 SELECT create_challenge_flag(
                     :challenge_id,
                     :flag,
                     :description,
                     :points,
-                    :order_index
+                    :order_index,
+                    :user_specific,
+                    :machine_template_id
                 )
             ");
 
@@ -662,7 +717,9 @@ class CtfCreationHandler
                 'flag' => $flag['flag'],
                 'description' => $flag['description'],
                 'points' => $flag['points'],
-                'order_index' => $flag['order_index']
+                'order_index' => $flag['order_index'],
+                'user_specific' => (bool)$flag['user_specific'],
+                'machine_template_id' => $machineTemplateId
             ]);
         }
     }

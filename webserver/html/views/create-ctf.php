@@ -205,6 +205,19 @@ if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess
                     <label for="flag-order">Order Index</label>
                     <input type="number" id="flag-order" name="flag-order" min="0" value="0">
                 </div>
+                <div class="form-group slider-container">
+                    <label class="option-switch">
+                        <input type="checkbox" id="flag-userspecific" name="flag-userspecific">
+                        <span class="option-slider round"></span>
+                    </label>
+                    <span class="option-switch-label">Userspecific Flag</span>
+                </div>
+                <div class="flag-vm-dropdown-container" style="display: none;">
+                    <label for="flag-vm">Assigned VM *</label>
+                    <select id="flag-vm" name="flag-vm">
+                        <option value="">-- Select VM --</option>
+                    </select>
+                </div>
                 <button type="submit" class="button button-primary">Add Flag</button>
             </form>
             <div class="flags-list" id="flags-list">

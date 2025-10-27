@@ -388,7 +388,8 @@ CREATE TABLE users (
     last_ip TEXT,
     running_challenge BIGINT,
     is_admin BOOLEAN DEFAULT FALSE,
-    vpn_static_ip INET REFERENCES vpn_static_ips(vpn_static_ip) ON DELETE SET NULL
+    vpn_static_ip INET REFERENCES vpn_static_ips(vpn_static_ip) ON DELETE SET NULL,
+    unique_id TEXT UNIQUE
 );
 
 
@@ -508,7 +509,9 @@ CREATE TABLE challenge_flags (
     flag TEXT NOT NULL,
     description TEXT,
     points BIGINT NOT NULL,
-    order_index BIGINT DEFAULT 0
+    order_index BIGINT DEFAULT 0,
+    user_specific BOOLEAN DEFAULT false,
+    machine_template_id BIGINT REFERENCES machine_templates(id) ON DELETE CASCADE DEFAULT NULL
 );
 
 

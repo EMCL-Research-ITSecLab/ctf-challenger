@@ -85,7 +85,7 @@ def launch_challenge():
             return {"error": "Invalid input data", "success": False}, 500
 
         try:
-            accessible_networks = launch_challenge_backend(challenge_template_id, user_id, db_conn, ip_pool, MONITORING_VPN_INTERFACE, MONITORING_DMZ_INTERFACE)
+            accessible_networks = launch_challenge_backend(challenge_template_id, user_id, db_conn, MONITORING_VPN_INTERFACE, MONITORING_DMZ_INTERFACE)
         except Exception as e:
             print("Error launching challenge", e, flush=True)
             return {"error": str(e), "success": False}, 500

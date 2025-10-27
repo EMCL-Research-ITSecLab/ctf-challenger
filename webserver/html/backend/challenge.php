@@ -528,11 +528,13 @@ class ChallengeHandler
     private function validateAndLockFlag(int $challengeId, string $flag)
     {
         $stmt = $this->pdo->prepare("
-            SELECT id, points FROM validate_and_lock_flag(:challenge_id, :flag)
+            SELECT id, points
+            FROM validate_and_lock_flag(:challenge_id, :flag, :user_id)
         ");
         $stmt->execute([
             'challenge_id' => $challengeId,
-            'flag' => $flag
+            'flag' => $flag,
+            'user_id' => $this->userId
         ]);
         $flagData = $stmt->fetch();
 

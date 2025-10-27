@@ -20,6 +20,7 @@
     "MAX_FLAG_POINTS": 1000,
     "MAX_HINT_LENGTH": 500,
     "MAX_HINT_POINTS": 500,
+    "MAX_ORDER_INDEX": 1000,
     "CTF_NAME_REGEX": "^[a-zA-Z0-9\\-_ ]+$",
     "VM_SUBNET_NAME_REGEX": "^[a-zA-Z0-9\\-_]+$",
     "DOMAIN_REGEX": "^([a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)(\\.[a-zA-Z0-9](?:[a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)*$"

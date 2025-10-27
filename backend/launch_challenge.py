@@ -316,7 +316,11 @@ def generate_user_specific_flag(flag_secret, user_email):
     Generate a user-specific flag using the secret and user email.
     Format: ITSEC{sha1.hmac_hash(key=secret,message=email)}
     """
-    hash_value = hmac.new(flag_secret, user_email, hashlib.sha1).hexdigest()
+    hash_value = hmac.new(
+        flag_secret.encode('utf-8'),
+        user_email.encode('utf-8'),
+        hashlib.sha1
+    ).hexdigest()
     return f"ITSEC{{{hash_value}}}"
 
 

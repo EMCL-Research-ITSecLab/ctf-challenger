@@ -20,6 +20,7 @@ class CTFCreator {
             this.fetchAvailableOVAs();
             this.setupImageUpload();
             this.updateLayout();
+            this.updateFlagOrderInput();
         });
     }
 
@@ -113,6 +114,13 @@ class CTFCreator {
         this.flagForm.addEventListener('submit', (e) => this.handleFlagFormSubmit(e));
         this.hintForm.addEventListener('submit', (e) => this.handleHintFormSubmit(e));
         this.ctfSubmitButton.addEventListener('click', () => this.handleCTFSubmit());
+
+        const userSpecificCheckbox = this.flagForm['flag-userspecific'];
+        if (userSpecificCheckbox) {
+            userSpecificCheckbox.addEventListener('change', () => {
+                this.toggleFlagVMDropdown();
+            });
+        }
     }
 
 
@@ -189,6 +197,7 @@ class CTFCreator {
 
             this.updateVMIcon(this.selectedVM);
             this.updateSubnetVMsDropdown();
+            this.updateFlagVMDropdown();
 
             document.querySelectorAll('.subnet-region').forEach(region => {
                 const subnetId = region.getAttribute('data-id');
@@ -220,6 +229,7 @@ class CTFCreator {
             };
             this.vms.push(vm);
             this.createVMIcon(vm);
+            this.updateFlagVMDropdown();
         }
 
         this.vmForm.reset();
@@ -269,7 +279,9 @@ class CTFCreator {
             flag: this.flagForm['flag-text'].value,
             description: this.flagForm['flag-description'].value,
             points: parseInt(this.flagForm['flag-points'].value),
-            order_index: parseInt(this.flagForm['flag-order'].value) || 0
+            order_index: parseInt(this.flagForm['flag-order'].value) || 0,
+            user_specific: this.flagForm['flag-userspecific'].checked,
+            vm_id: this.flagForm['flag-userspecific'].checked ? this.flagForm['flag-vm'].value : null
         };
 
         if (this.selectedFlag) {
@@ -287,7 +299,9 @@ class CTFCreator {
         }
 
         this.flagForm.reset();
+        this.toggleFlagVMDropdown();
         this.updateFlagsList();
+        this.updateFlagOrderInput();
     }
 
 
@@ -368,7 +382,9 @@ class CTFCreator {
                 flag: flag.flag,
                 description: flag.description,
                 points: flag.points,
-                order_index: flag.order_index
+                order_index: flag.order_index,
+                user_specific: flag.user_specific,
+                vm_name: flag.vm_id ? this.vms.find(vm => vm.id === flag.vm_id)?.name : null
             }))));
 
             formData.append('hints', JSON.stringify(this.hints.map(hint => ({
@@ -619,6 +635,9 @@ class CTFCreator {
         const flagText = this.flagForm['flag-text'].value.trim();
         const flagDescription = this.flagForm['flag-description'].value.trim();
         const flagPoints = parseInt(this.flagForm['flag-points'].value);
+        const isUserSpecific = this.flagForm['flag-userspecific'].checked;
+        const orderIndex = parseInt(this.flagForm['flag-order'].value || '0');
+        const selectedVmId = this.flagForm['flag-vm']?.value;
 
         if (!flagText) {
             errors.push('Flag text is required');
@@ -639,6 +658,42 @@ class CTFCreator {
         } else if (flagPoints > this.config.MAX_FLAG_POINTS) {
             errors.push(`Maximum points per flag is ${this.config.MAX_FLAG_POINTS}`);
             fields.push('flag-points');
+        }
+
+        if (isNaN(orderIndex) || orderIndex < 0) {
+            errors.push('Order index must be 0 or greater');
+            fields.push('flag-order');
+        } else if (orderIndex > this.config.MAX_ORDER_INDEX) {
+            errors.push(`Order index cannot exceed ${this.config.MAX_ORDER_INDEX}`);
+            fields.push('flag-order');
+        } else {
+            const isDuplicate = this.flags.some(flag => {
+                if (this.selectedFlag && flag.id === this.selectedFlag.id) {
+                    return false;
+                }
+                return flag.order_index === orderIndex;
+            });
+
+            if (isDuplicate) {
+                errors.push(`Order index ${orderIndex} is already used by another flag`);
+                fields.push('flag-order');
+            }
+        }
+
+        if (isUserSpecific) {
+            if (!selectedVmId) {
+                errors.push('A VM must be selected for user-specific flags');
+                fields.push('flag-vm');
+                if (this.vms.length === 0) {
+                    this.tabVM.click();
+                }
+            } else {
+                const vmExists = this.vms.some(vm => vm.id === selectedVmId);
+                if (!vmExists) {
+                    errors.push('Selected VM does not exist or has been removed');
+                    fields.push('flag-vm');
+                }
+            }
         }
 
         if (errors.length) {
@@ -778,6 +833,38 @@ class CTFCreator {
         }
     }
 
+    toggleFlagVMDropdown() {
+        const isUserSpecific = this.flagForm['flag-userspecific'].checked;
+        const vmDropdownContainer = document.querySelector('.flag-vm-dropdown-container');
+
+        if (vmDropdownContainer) {
+            if (isUserSpecific) {
+                vmDropdownContainer.style.display = 'block';
+                this.updateFlagVMDropdown();
+            } else {
+                vmDropdownContainer.style.display = 'none';
+            }
+        }
+    }
+
+    updateFlagVMDropdown() {
+        const vmDropdown = this.flagForm['flag-vm'];
+        if (!vmDropdown) return;
+
+        vmDropdown.innerHTML = '<option value="">-- Select VM --</option>';
+
+        this.vms.forEach(vm => {
+            const option = document.createElement('option');
+            option.value = vm.id;
+            option.textContent = `${vm.name} (${vm.ip})`;
+            vmDropdown.appendChild(option);
+        });
+
+        if (this.selectedFlag?.vm_id) {
+            vmDropdown.value = this.selectedFlag.vm_id;
+        }
+    }
+
     updateFlagsList() {
         this.flagsList.innerHTML = '';
         const sortedFlags = [...this.flags].sort((a, b) => a.order_index - b.order_index);
@@ -787,12 +874,16 @@ class CTFCreator {
             flagItem.className = 'list-item';
             if (this.selectedFlag?.id === flag.id) flagItem.classList.add('selected');
 
+            const vmInfo = flag.vm_id ?
+                this.vms.find(vm => vm.id === flag.vm_id) : null;
+            const vmDisplay = vmInfo ? ` • VM: ${vmInfo.name}` : '';
+
             flagItem.innerHTML = `
                 <div class="flag-icon"><i class="fa-solid fa-flag"></i></div>
                 <div class="flag-content">
                     <div class="flag-title">${flag.flag}</div>
                     <div class="flag-meta">
-                        ${flag.points} points • ${flag.description || 'No description'}
+                        ${flag.points} points • ${flag.description || 'No description'} • ${flag.user_specific ? `User specific${vmDisplay} &rarr; /root/flag_${flag.order_index}.txt` : 'Static'}
                     </div>
                 </div>
                 <div class="flag-actions">
@@ -814,12 +905,27 @@ class CTFCreator {
                     if (index !== -1) {
                         this.flags.splice(index, 1);
                         this.updateFlagsList();
+                        this.updateFlagOrderInput();
                     }
                 }
             });
 
             this.flagsList.appendChild(flagItem);
         });
+    }
+
+    getNextAvailableOrderIndex() {
+        if (this.flags.length === 0) {
+            return 0;
+        }
+
+        const maxOrderIndex = Math.max(...this.flags.map(flag => flag.order_index));
+        return maxOrderIndex + 1;
+    }
+
+    updateFlagOrderInput() {
+        const nextOrderIndex = this.getNextAvailableOrderIndex();
+        this.flagForm['flag-order'].value = nextOrderIndex;
     }
 
     updateHintsList() {
@@ -908,6 +1014,13 @@ class CTFCreator {
         this.flagForm['flag-description'].value = flag.description || '';
         this.flagForm['flag-points'].value = flag.points;
         this.flagForm['flag-order'].value = flag.order_index;
+        this.flagForm['flag-userspecific'].checked = flag.user_specific;
+
+        this.toggleFlagVMDropdown();
+        if (flag.vm_id && this.flagForm['flag-vm']) {
+            this.flagForm['flag-vm'].value = flag.vm_id;
+        }
+
         this.flagSubmitButton.textContent = 'Update Flag';
 
         if (!this.flagInput.classList.contains('active')) {
@@ -1197,6 +1310,13 @@ class CTFCreator {
             subnet.attachedVMs = subnet.attachedVMs.filter(id => id !== vmId);
         });
 
+        this.flags.forEach(flag => {
+            if (flag.vm_id === vmId) {
+                flag.vm_id = null;
+            }
+        });
+        this.updateFlagsList();
+
         const index = this.vms.findIndex(vm => vm.id === vmId);
         if (index !== -1) this.vms.splice(index, 1);
 
@@ -1207,6 +1327,7 @@ class CTFCreator {
         });
 
         this.updateSubnetVMsDropdown();
+        this.updateFlagVMDropdown();
 
         if (this.selectedVM?.id === vmId) this.clearSelection();
         this.updateLayout();
@@ -1345,6 +1466,8 @@ class CTFCreator {
         this.vmSubmitButton.textContent = 'Add VM';
         this.subnetSubmitButton.textContent = 'Add Subnet';
         this.updateSubnetVMsDropdown();
+        this.toggleFlagVMDropdown();
+        this.updateFlagOrderInput();
     }
 
     updateLayout() {

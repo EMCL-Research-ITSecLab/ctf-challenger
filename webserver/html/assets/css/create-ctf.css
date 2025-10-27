@@ -805,3 +805,7 @@ input:checked + .option-slider:before {
 [data-theme="light"] .ctf-image-preview[src*="/assets/images/ctf-default.png"] {
     filter: invert(1) hue-rotate(180deg) saturate(0.6) brightness(1) contrast(1.2);
 }
+
+.flag-vm-dropdown-container {
+    margin-bottom: 20px;
+}

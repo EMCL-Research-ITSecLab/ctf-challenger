@@ -10,6 +10,8 @@ from stop_challenge import delete_iptables_rules, remove_database_entries, stop_
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 import time
 from dotenv import load_dotenv, find_dotenv
+import hashlib
+import hmac
 
 load_dotenv(find_dotenv())
 
@@ -25,17 +27,19 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 
 @retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
        reraise=True)
-def launch_challenge(challenge_template_id, user_id, db_conn, ip_pool, vpn_monitoring_device, dmz_monitoring_device):
+def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
     with db_conn:
         try:
             user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
+            user_email = fetch_user_email(user_id, db_conn)
             challenge_template = ChallengeTemplate(challenge_template_id)
             fetch_machines(challenge_template, db_conn)
             fetch_network_and_connection_templates(challenge_template, db_conn)
             fetch_domain_templates(challenge_template, db_conn)
+            fetch_challenge_flags(challenge_template, db_conn)
         except Exception as e:
             raise ValueError(f"Error fetching from database: {e}")
 
@@ -58,6 +62,8 @@ def launch_challenge(challenge_template_id, user_id, db_conn, ip_pool, vpn_monit
             launch_machines(challenge)
 
             configure_wazuh_for_challenge(challenge)
+
+            process_all_user_specific_flags(challenge, user_email)
 
             add_running_challenge_to_user(challenge, user_id, db_conn)
             add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
@@ -305,6 +311,74 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
     subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
 
+def generate_user_specific_flag(flag_secret, user_email):
+    """
+    Generate a user-specific flag using the secret and user email.
+    Format: ITSEC{sha1.hmac_hash(key=secret,message=email)}
+    """
+    hash_value = hmac.new(flag_secret, user_email, hashlib.sha1).hexdigest()
+    return f"ITSEC{{{hash_value}}}"
+
+
+def process_all_user_specific_flags(challenge, user_email):
+    """
+    Process all user-specific flags for the challenge.
+    Generates personalized flags and writes them to the appropriate VMs.
+    """
+    if not hasattr(challenge.template, 'flags'):
+        return
+
+    flags_by_machine = {}
+    for flag in challenge.template.flags:
+        if flag['user_specific'] and flag['machine_template_id']:
+            machine_template_id = flag['machine_template_id']
+            if machine_template_id not in flags_by_machine:
+                flags_by_machine[machine_template_id] = []
+            flags_by_machine[machine_template_id].append(flag)
+
+    for machine_template_id, flags in flags_by_machine.items():
+        machine = None
+        for m in challenge.machines.values():
+            if m.template.id == machine_template_id:
+                machine = m
+                break
+
+        if machine is None:
+            print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
+            continue
+
+        try:
+            write_user_specific_flags_to_vm(machine, flags, user_email)
+        except Exception as e:
+            print(f"[Error] Failed to write flags to VM {machine.id}: {e}", flush=True)
+            raise
+
+
+def write_user_specific_flags_to_vm(machine, flags, user_email):
+    """
+    Write user-specific flags to a VM via QEMU Guest Agent.
+    """
+    for flag in flags:
+        order_index = flag['order_index']
+        flag_secret = flag['flag']
+
+        personalized_flag = generate_user_specific_flag(flag_secret, user_email)
+
+        flag_path = f"/root/flag_{order_index}.txt"
+
+        escaped_flag = shlex.quote(personalized_flag)
+
+        cmd = ["qm", "guest", "exec", str(machine.id), "--",
+               "bash", "-c", f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path}"]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
+
+        print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
+
+
 def generate_mac_address(machine_id, local_network_id, local_connection_id):
     """
     Generate a MAC address based on the machine ID, network ID, and connection ID.
@@ -436,6 +510,46 @@ def fetch_user_vpn_ip(user_id, db_conn):
         raise ValueError("User VPN IP not found")
 
     return user_vpn_ip
+
+
+def fetch_user_email(user_id, db_conn):
+    """
+    Fetch the email address for the given user ID.
+    """
+    with db_conn.cursor() as cursor:
+        cursor.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        user_email = cursor.fetchone()[0]
+
+    if user_email is None:
+        raise ValueError("User email not found")
+
+    return user_email
+
+
+def fetch_challenge_flags(challenge_template, db_conn):
+    """
+    Fetch challenge flags for the given challenge template.
+    """
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+                       SELECT id, flag, description, points, order_index, user_specific, machine_template_id
+                       FROM challenge_flags
+                       WHERE challenge_template_id = %s
+                       ORDER BY order_index
+                       """, (challenge_template.id,))
+
+        challenge_template.flags = []
+        for row in cursor.fetchall():
+            flag_data = {
+                'id': row[0],
+                'flag': row[1],
+                'description': row[2],
+                'points': row[3],
+                'order_index': row[4],
+                'user_specific': row[5],
+                'machine_template_id': row[6]
+            }
+            challenge_template.flags.append(flag_data)
 
 
 def add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device):

@@ -193,7 +193,9 @@ CREATE FUNCTION create_challenge_flag(
     p_flag TEXT,
     p_description TEXT,
     p_points BIGINT,
-    p_order_index BIGINT
+    p_order_index BIGINT,
+    p_user_specific BOOLEAN,
+    p_machine_template_id BIGINT
 ) RETURNS BIGINT
 LANGUAGE plpgsql
 SET plpgsql.variable_conflict = 'use_column'
@@ -206,13 +208,17 @@ BEGIN
         flag,
         description,
         points,
-        order_index
+        order_index,
+        user_specific,
+        machine_template_id
     ) VALUES (
         p_challenge_template_id,
         p_flag,
         p_description,
         p_points,
-        p_order_index
+        p_order_index,
+        p_user_specific,
+        p_machine_template_id
     ) RETURNING id INTO new_flag_id;
     RETURN new_flag_id::BIGINT;
 END;

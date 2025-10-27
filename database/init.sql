@@ -509,7 +509,9 @@ CREATE TABLE challenge_flags (
     flag TEXT NOT NULL,
     description TEXT,
     points BIGINT NOT NULL,
-    order_index BIGINT DEFAULT 0
+    order_index BIGINT DEFAULT 0,
+    user_specific BOOLEAN DEFAULT false,
+    machine_template_id BIGINT REFERENCES machine_templates(id) ON DELETE CASCADE DEFAULT NULL
 );
 
 

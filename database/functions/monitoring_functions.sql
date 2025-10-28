@@ -21,9 +21,10 @@ BEGIN
     END IF;
 
     -- Find the most recent challenge instance for this template
-    SELECT u2.id INTO v_challenge_id
+    SELECT c.id INTO v_challenge_id
     FROM users u2 JOIN challenges c ON u2.running_challenge = c.id
-    WHERE c.challenge_template_id = p_challenge_template_id;
+    WHERE c.challenge_template_id = p_challenge_template_id
+    AND u2.id = p_user_id;
 
     IF v_challenge_id IS NULL THEN
         RAISE EXCEPTION 'No challenge instance found for template %', p_challenge_template_id;
@@ -66,9 +67,10 @@ BEGIN
     END IF;
 
     -- Find the challenge instance
-    SELECT u2.id INTO v_challenge_id
+    SELECT c.id INTO v_challenge_id
     FROM users u2 JOIN challenges c ON u2.running_challenge = c.id
-    WHERE c.challenge_template_id = p_challenge_template_id;
+    WHERE c.challenge_template_id = p_challenge_template_id
+    AND u2.id = p_user_id;
 
     IF v_challenge_id IS NULL THEN
         RAISE EXCEPTION 'No challenge instance found for template %', p_challenge_template_id;

@@ -86,9 +86,9 @@ class ChallengeWorker
         $this->pdo->beginTransaction();
 
         try {
-            $this->stopChallenge($challenge['user_id']);
             $this->markAttemptAsCompleted($challenge['user_id'], $challenge['challenge_template_id']);
             $this->logUserNetworkTraceStop($challenge['user_id'], $challenge['challenge_template_id']);
+            $this->stopChallenge($challenge['user_id']);
             if ($this->shouldDeleteChallengeTemplate($challenge['challenge_template_id'])) {
                 $this->deleteChallengeTemplate($challenge['challenge_template_id']);
             }

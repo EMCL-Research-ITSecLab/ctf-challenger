@@ -328,7 +328,7 @@ class CtfCreationHandler
             }
         }
 
-        $flagOrderIndexes = []:
+        $flagOrderIndexes = [];
         foreach ($flags as $i => $flag) {
             $n = $i + 1;
             if (empty(trim($flag['flag'] ?? ''))) {
@@ -712,15 +712,15 @@ class CtfCreationHandler
                 )
             ");
 
-            $stmt->execute([
-                'challenge_id' => $challengeId,
-                'flag' => $flag['flag'],
-                'description' => $flag['description'],
-                'points' => $flag['points'],
-                'order_index' => $flag['order_index'],
-                'user_specific' => (bool)$flag['user_specific'],
-                'machine_template_id' => $machineTemplateId
-            ]);
+            $stmt->bindValue(':challenge_id', $challengeId, PDO::PARAM_INT);
+            $stmt->bindValue(':flag', $flag['flag'], PDO::PARAM_STR);
+            $stmt->bindValue(':description', $flag['description'], PDO::PARAM_STR);
+            $stmt->bindValue(':points', $flag['points'], PDO::PARAM_INT);
+            $stmt->bindValue(':order_index', $flag['order_index'], PDO::PARAM_INT);
+            $stmt->bindValue(':user_specific', (bool)$flag['user_specific'], PDO::PARAM_BOOL);
+            $stmt->bindValue(':machine_template_id', $machineTemplateId, PDO::PARAM_INT);
+
+            $stmt->execute();
         }
     }
 

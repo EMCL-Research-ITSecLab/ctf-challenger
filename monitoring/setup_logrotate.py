@@ -162,6 +162,7 @@ def test_logrotate():
     Test the logrotate configuration in debug mode
     """
     log_section("Testing logrotate configuration")
+    run_cmd_with_realtime_output(["sudo", "mkdir", "-p", "/var/log/suricata/rotated/daily"])
     run_cmd_with_realtime_output(["sudo", "logrotate", "-d", LOGROTATE_CONFIG_PATH])
     log_success("Logrotate debug test completed")
 

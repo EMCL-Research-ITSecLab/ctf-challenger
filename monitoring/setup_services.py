@@ -208,9 +208,9 @@ for type in vpn backend dmz; do
         timestamp=$(date +%Y-%m-%d-%H%M%S)
         if gzip -c "$file" > "$ARCHIVE_DIR/${base}-${timestamp}.gz"; then
             rm -f "$file"
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Archiviert: $base"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Archived: $base"
         else
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] FEHLER beim Archivieren: $base" >&2
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR Archiving: $base" >&2
         fi
     done
 done

@@ -146,6 +146,7 @@ CLOUD_INIT_NETWORK_SUBNET='10.32.0.0/20'
 
 ROTATE_DAYS='90'
 LOGROTATE_CONFIG_DIR='/etc/logrotate.d'
+PCAP_ROTATION_INTERVAL='*/15'
 
 IPTABLES_FILE='/etc/iptables-backend/iptables.sh'
 

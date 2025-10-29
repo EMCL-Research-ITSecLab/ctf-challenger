@@ -640,7 +640,7 @@ outputs:
   - pcap-log:
       enabled: yes
       filename: pcap/suricata_vpn.pcap
-      limit: 102400000000
+      limit: 5000000000
 
   - eve-log:
       enabled: yes
@@ -910,7 +910,7 @@ outputs:
   - pcap-log:
       enabled: yes
       filename: pcap/suricata_backend.pcap
-      limit: 102400000000
+      limit: 5000000000
 
   - eve-log:
       enabled: yes
@@ -1204,7 +1204,7 @@ outputs:
   - pcap-log:
       enabled: yes
       filename: pcap/suricata_dmz.pcap
-      limit: 102400000000
+      limit: 5000000000
 
   - eve-log:
       enabled: yes

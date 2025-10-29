@@ -768,3 +768,20 @@ BEGIN
     ORDER BY b.rarity DESC, ub.earned_at DESC, b.id;
 END;
 $$;
+
+CREATE FUNCTION get_challenge_template_id_from_running_challenge(p_user_id BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_challenge_template_id BIGINT;
+BEGIN
+    SELECT c.challenge_template_id
+    INTO v_challenge_template_id
+    FROM users u
+    JOIN challenges c ON u.running_challenge = c.id
+    WHERE u.id = p_user_id;
+
+    RETURN v_challenge_template_id;
+END;
+$$;

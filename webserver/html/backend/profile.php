@@ -1148,6 +1148,10 @@ class ProfileHandler
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($result && $result['running_challenge'] !== null) {
+                $stmt = $this->pdo->prepare("SELECT get_challenge_template_id_from_running_challenge(:user_id) AS template_id");
+                $stmt->execute(['user_id' => $this->userId]);
+                $templateResult = $stmt->fetch(PDO::FETCH_ASSOC);
+                $this->logUserNetworkTraceStop($templateResult['template_id']);
                 $response = $this->curlHelper->makeBackendRequest(
                     '/stop-challenge',
                     'POST',
@@ -1160,7 +1164,6 @@ class ProfileHandler
                     throw new CustomException("Failed to stop current challenge", 500);
                 }
                 $this->logger->logDebug("Stopped running challenge - User ID: $this->userId");
-                $this->logUserNetworkTraceStop($result['running_challenge']);
             }
 
         } catch (PDOException $e) {
@@ -1253,7 +1256,7 @@ class ProfileHandler
             $this->pdo->beginTransaction();
 
             $ip_addr = $_SERVER['REMOTE_ADDR'];
-            $this->pdo->prepare("SELECT delete_user_data(:user_id, :password_hash)")
+            $this->pdo->prepare("SELECT delete_user_data(:user_id, :password_hash, :ip_addr)")
                 ->execute([
                     'user_id' => $this->userId,
                     'password_hash' => $hashedPassword,

@@ -93,32 +93,6 @@ def deploy_logrotate_config():
     endscript
 }}
 
-{PCAP_DIR}/*.pcap.[0-9]* {{
-    daily
-    size 5G
-    rotate {ROTATE_DAYS}
-    compress
-    delaycompress
-    missingok
-    notifempty
-    sharedscripts
-    dateext
-    dateformat -%Y-%m-%d-%s
-    prerotate
-        mkdir -p /var/log/suricata/rotated/daily
-    endscript
-    olddir /var/log/suricata/rotated/daily
-    postrotate
-        /bin/kill -HUP `cat /var/run/suricata-vpn.pid 2>/dev/null` 2>/dev/null || true
-        /bin/kill -HUP `cat /var/run/suricata-dmz.pid 2>/dev/null` 2>/dev/null || true
-        /bin/kill -HUP `cat /var/run/suricata-backend.pid 2>/dev/null` 2>/dev/null || true
-        CURRENT_DATE=$(date +%Y-%m-%d)
-        TARGET_DIR="/var/log/suricata/rotated/${{CURRENT_DATE}}"
-        mkdir -p "$TARGET_DIR"
-        find /var/log/suricata/rotated/daily -name "*-${{CURRENT_DATE}}-*.gz" -exec mv -t "$TARGET_DIR/" {{}} + 2>/dev/null || true
-    endscript
-}}
-
 {SURICATA_LOG_DIR}/*.log {{
     daily
     size 2G

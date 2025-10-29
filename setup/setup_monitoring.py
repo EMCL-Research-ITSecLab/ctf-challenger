@@ -62,7 +62,7 @@ ENV_VARIABLES = [
     "WAZUH_REGISTRATION_PORT", "WAZUH_COMMUNICATION_PORT", "WAZUH_ENROLLMENT_PASSWORD",
 
     # Logrotate Configuration
-    "ROTATE_DAYS",
+    "ROTATE_DAYS", "PCAP_ROTATION_INTERVAL",
 
     # Service Ports
     "MONITORING_VM_EXPORTER_PORT", "WEBSERVER_VM_EXPORTER_PORT",
@@ -232,7 +232,7 @@ def create_env_file(env_vars: Dict[str, str], target_path: str) -> bool:
                     "WAZUH_REGISTRATION_PORT", "WAZUH_COMMUNICATION_PORT", "WAZUH_MANAGER_PORT", "WAZUH_API_PORT", "WAZUH_ENROLLMENT_PASSWORD"
                 ],
                 "LOGROTATE CONFIGURATION": [
-                    "LOGROTATE_CONFIG_DIR", "ROTATE_DAYS"
+                    "LOGROTATE_CONFIG_DIR", "ROTATE_DAYS", "PCAP_ROTATION_INTERVAL"
                 ],
                 "SERVICE PORTS": [
                     "MONITORING_VM_EXPORTER_PORT", "WEBSERVER_VM_EXPORTER_PORT",

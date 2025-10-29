@@ -55,6 +55,11 @@ BANNER_SERVICE_NAME = "banner-server.service"
 BANNER_SERVER_PORT = os.getenv("BANNER_SERVER_PORT", "80")
 PROXMOX_SSH_KEYFILE = os.getenv("PROXMOX_SSH_KEYFILE", "/root/.ssh/id_rsa.pub")
 
+# PCAP Rotation configuration
+PCAP_ROTATION_SCRIPT = "/usr/local/bin/suricata-pcap-rotate.sh"
+PCAP_ROTATION_LOG = "/var/log/suricata/pcap-rotate.log"
+PCAP_ROTATION_INTERVAL = os.getenv("PCAP_ROTATION_INTERVAL", "*/15")
+
 # ===== SERVICE DEFINITIONS =====
 
 SURICATA_VPN_SERVICE = f"""[Unit]
@@ -179,6 +184,38 @@ SERVICES = {
     "vector-zeek.service": VECTOR_ZEEK_SERVICE,
 }
 
+# PCAP Rotation Script
+PCAP_ROTATION_SCRIPT_CONTENT = """#!/bin/bash
+PCAP_DIR="/var/log/suricata/pcap"
+ARCHIVE_DIR="/var/log/suricata/rotated/pcap"
+MIN_AGE_MINUTES=2
+mkdir -p "$ARCHIVE_DIR"
+
+for type in vpn backend dmz; do
+    current=$(ls -1 "$PCAP_DIR"/suricata_${type}.pcap.* 2>/dev/null | sort -n | tail -1)
+    
+    for file in "$PCAP_DIR"/suricata_${type}.pcap.*; do
+        [ ! -f "$file" ] && continue
+        [ "$file" = "$current" ] && continue
+        
+        [ $(find "$file" -mmin +$MIN_AGE_MINUTES 2>/dev/null | wc -l) -eq 0 ] && continue
+        
+        if command -v lsof >/dev/null 2>&1; then
+            lsof "$file" >/dev/null 2>&1 && continue
+        fi
+        
+        base=$(basename "$file")
+        timestamp=$(date +%Y-%m-%d-%H%M%S)
+        if gzip -c "$file" > "$ARCHIVE_DIR/${base}-${timestamp}.gz"; then
+            rm -f "$file"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Archiviert: $base"
+        else
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] FEHLER beim Archivieren: $base" >&2
+        fi
+    done
+done
+"""
+
 
 def check_root_privileges():
     """
@@ -188,6 +225,55 @@ def check_root_privileges():
         log_error("This script must be run as root")
         return False
     return True
+
+
+@time_function
+def create_pcap_rotation_script():
+    """
+    Create the PCAP rotation script and set up cron job
+    """
+    log_section("Setting up PCAP Rotation")
+
+    try:
+        log_info(f"Creating PCAP rotation script at {PCAP_ROTATION_SCRIPT}")
+        with open(PCAP_ROTATION_SCRIPT, "w") as f:
+            f.write(PCAP_ROTATION_SCRIPT_CONTENT)
+
+        os.chmod(PCAP_ROTATION_SCRIPT, 0o755)
+        log_debug(f"Made {PCAP_ROTATION_SCRIPT} executable")
+
+        log_dir = os.path.dirname(PCAP_ROTATION_LOG)
+        os.makedirs(log_dir, exist_ok=True)
+        Path(PCAP_ROTATION_LOG).touch()
+        os.chmod(PCAP_ROTATION_LOG, 0o644)
+        log_debug(f"Created log file: {PCAP_ROTATION_LOG}")
+
+        cron_file = "/etc/cron.d/suricata-pcap-rotate"
+        cron_content = f"""# PCAP rotation for Suricata
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+{PCAP_ROTATION_INTERVAL} * * * * root {PCAP_ROTATION_SCRIPT} >> {PCAP_ROTATION_LOG} 2>&1
+"""
+
+        log_info(f"Creating cron file: {cron_file}")
+        with open(cron_file, "w") as f:
+            f.write(cron_content)
+
+        os.chmod(cron_file, 0o644)
+        log_debug(f"Set permissions on {cron_file}")
+
+        result = run_cmd(["systemctl", "is-active", "cron"], check=False, capture_output=True)
+        if result.stdout.strip() != "active":
+            log_warning("Cron service is not active, attempting to start...")
+            run_cmd(["systemctl", "start", "cron"], check=True)
+            run_cmd(["systemctl", "enable", "cron"], check=True)
+
+        log_success(f"PCAP rotation setup completed (runs every {PCAP_ROTATION_INTERVAL} minutes)")
+
+    except Exception as e:
+        log_error(f"Failed to setup PCAP rotation: {e}")
+        raise
 
 
 @time_function
@@ -359,6 +445,9 @@ def main():
 
             # Create and enable local services
             create_local_services()
+
+            # Setup PCAP rotation
+            create_pcap_rotation_script()
 
             # Setup remote banner service
             setup_remote_banner_service()

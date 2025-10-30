@@ -302,7 +302,7 @@ def setup_api_token():
 
     proxmox.access.roles.post(
         roleid=role_id,
-        privs="Datastore.AllocateTemplate"
+        privs="Datastore.AllocateTemplate, Datastore.Allocate"
     )
 
     print("\tRestricting web server API token permissions")

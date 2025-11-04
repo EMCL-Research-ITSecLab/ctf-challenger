@@ -3,7 +3,7 @@ import os
 from login_user_ui import login_user_ui
 from upload_diskfile_ui import upload_all_diskfiles_ui
 
-YAML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../yaml"))
+YAML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../automatic_challenge_import"))
 sys.path.append(YAML_DIR)
 from yaml_parser import yaml_to_dict
 

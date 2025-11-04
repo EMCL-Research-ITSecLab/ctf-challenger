@@ -8,8 +8,8 @@ database/backups
 **/*.phar
 webserver/html/vendor
 **/.phpunit.result.cache
-yaml/ctf-config.yaml
-yaml/ubuntu-cloudimg.yaml
-yaml/dc1.yaml
+automatic_challenge_import/ctf-config.yaml
+automatic_challenge_import/ubuntu-cloudimg.yaml
+automatic_challenge_import/dc1.yaml
 tests/performance/utils/**.pem
 tests/security

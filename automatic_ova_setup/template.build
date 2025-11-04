@@ -1,0 +1,31 @@
+FROM base.ova
+VM_NAME VM Template
+SETUP_USER ctf-admin
+SETUP_PORT 22
+SETUP_IDENTITY ~/.ssh/id_rsa
+
+USER root
+
+COPY some-file.txt /home/ctf-admin/some-file.txt
+RUN chown ctf-admin:ctf-admin /home/ctf-admin/some-file.txt
+
+SERVICE permanent_running_service {
+    DESCRIPTION "Permanent Running Service"
+    AFTER network.target
+    CMD /usr/bin/python3 /home/ctf-admin/permanent_running.py
+    RESTART always
+    USER root
+}
+
+SERVICE startup_service {
+    DESCRIPTION "Startup Service"
+    AFTER network.target
+    CMD /usr/bin/python3 /home/ctf-admin/startup.py
+    TYPE oneshot
+    RESTART on-failure
+    RESTART_SEC 10s
+    USER root
+}
+
+
+

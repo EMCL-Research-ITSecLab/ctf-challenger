@@ -54,7 +54,9 @@ def yaml_to_create_challenge_form_data(path_to_yaml, prints=False):
             "flag": flag_data.get("flag", ""),
             "description": flag_data.get("description", ""),
             "points": flag_data.get("points", 0),
-            "order_index": flag_data.get("order_index", 0)
+            "order_index": flag_data.get("order_index", 0),
+            "user_specific": flag_data.get("user_specific", False),
+            "vm_name": flag_data.get("vm_name", "")
         }
         form_data["flags"].append(flag_entry)
     form_data["flags"] = json.dumps(form_data["flags"])

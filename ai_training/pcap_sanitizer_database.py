@@ -77,6 +77,21 @@ class TemporalIPFilter:
         print(f"Found {len(non_consenting_users)} users without AI training consent")
 
         for user in non_consenting_users:
+            if user['vpn_static_ip']:
+                try:
+                    self.temporal_removals.append({
+                        'username': user['username'],
+                        'email': user['email'],
+                        'network': ipaddress.ip_network(user['vpn_static_ip'] + '/32'),
+                        'started_at': 0.0,
+                        'stopped_at': float('inf'),
+                        'is_static_vpn': True
+                    })
+                    print(f"  Static VPN IP: {user['vpn_static_ip']} (always) ({user['username']})")
+                except ValueError:
+                    print(f"Warning: Invalid static VPN IP {user['vpn_static_ip']} for {user['username']}")
+
+            # Also trace their dynamic network assignments
             self._trace_user_networks(cursor, user['username'], user['email'])
 
         cursor.close()
@@ -147,7 +162,8 @@ class TemporalIPFilter:
                 'email': trace['email'],
                 'network': network,
                 'started_at': started_at,
-                'stopped_at': stopped_at
+                'stopped_at': stopped_at,
+                'is_static_vpn': False
             })
 
             if trace['stopped_at']:
@@ -396,6 +412,7 @@ class PCAPSanitizer:
             if input_path.endswith('.gz'):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
                     temp_input = tmp.name
+                print(f"  Decompressing input...")
                 with gzip.open(input_path, 'rb') as f_in:
                     with open(temp_input, 'wb') as f_out:
                         while True:
@@ -404,6 +421,7 @@ class PCAPSanitizer:
                                 break
                             f_out.write(chunk)
                 input_path = temp_input
+                print(f"  ✓ Decompressed")
 
             if not dry_run:
                 if output_path.endswith('.gz'):
@@ -476,13 +494,32 @@ class PCAPSanitizer:
                       f"kept {result['packets_kept']:,}")
 
             if not dry_run and output_path.endswith('.gz'):
+                print(f"\n  Compressing output to {output_path}...")
+                file_size = os.path.getsize(temp_output)
+                bytes_written = 0
+                last_print = time.time()
+
                 with open(temp_output, 'rb') as f_in:
-                    with gzip.open(output_path, 'wb') as f_out:
+                    with gzip.open(output_path, 'wb', compresslevel=6) as f_out:
                         while True:
-                            chunk = f_in.read(1024 * 1024)
+                            chunk = f_in.read(8 * 1024 * 1024)  # 8MB chunks
                             if not chunk:
                                 break
                             f_out.write(chunk)
+                            bytes_written += len(chunk)
+
+                            # Print progress every 2 seconds
+                            now = time.time()
+                            if now - last_print >= 2.0:
+                                progress = (bytes_written / file_size) * 100
+                                mb_written = bytes_written / (1024 * 1024)
+                                mb_total = file_size / (1024 * 1024)
+                                print(
+                                    f"  Compression progress: {progress:.1f}% ({mb_written:.1f} MB / {mb_total:.1f} MB)",
+                                    end='\r')
+                                last_print = now
+
+                print(f"  ✓ Compressed output written to {output_path}               ")
                 os.remove(temp_output)
 
             if temp_input and os.path.exists(temp_input):
@@ -641,6 +678,7 @@ def merge_pcaps(output_path: str, input_paths: List[str],
                 os.remove(temp_input)
 
     if is_compressed:
+        print(f"Compressing merged output...")
         with open(temp_output, 'rb') as f_in:
             with gzip.open(output_path, 'wb') as f_out:
                 while True:

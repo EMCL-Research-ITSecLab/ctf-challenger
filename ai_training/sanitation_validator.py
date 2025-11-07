@@ -65,6 +65,20 @@ class TemporalRuleLoader:
         print(f"Found {len(non_consenting_users)} users without consent")
 
         for user in non_consenting_users:
+            if user['vpn_static_ip']:
+                try:
+                    self.temporal_rules.append({
+                        'username': user['username'],
+                        'email': user['email'],
+                        'network': ipaddress.ip_network(user['vpn_static_ip'] + '/32'),  # /32 = single IP
+                        'started_at': 0.0,  # Beginning of time
+                        'stopped_at': float('inf'),  # Forever
+                        'is_static_vpn': True
+                    })
+                    print(f"  Static VPN IP: {user['vpn_static_ip']} (always) ({user['username']})")
+                except ValueError:
+                    print(f"Warning: Invalid static VPN IP {user['vpn_static_ip']} for {user['username']}")
+
             self._trace_user_networks(cursor, user['username'], user['email'])
 
         cursor.close()
@@ -230,7 +244,7 @@ class PCAPVerifier:
                     print(f"Invalid PCAP magic: {hex(magic)}")
                     return result
 
-                f.read(20)
+                f.read(20)  # Skip rest of global header
 
                 while True:
                     packet_header = f.read(16)
@@ -296,7 +310,7 @@ class PCAPVerifier:
                 return None
 
             eth_type = (data[12] << 8) | data[13]
-            if eth_type != 0x0800:
+            if eth_type != 0x0800:  # IPv4
                 return None
 
             ip_data = data[14:]

@@ -2,7 +2,7 @@ FROM base.ova
 VM_NAME VM Template
 SETUP_USER ctf-admin
 SETUP_PORT 22
-SETUP_IDENTITY ~/.ssh/id_rsa
+SETUP_IDENTITY_FILE ~/.ssh/id_rsa
 
 USER root
 

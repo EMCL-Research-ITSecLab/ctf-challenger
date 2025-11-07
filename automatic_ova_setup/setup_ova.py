@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import posixpath
 import shlex
 import subprocess
 import hashlib
@@ -160,17 +161,47 @@ class VMHandler:
             print(f"Failed to execute command on VM: {self.vmname}: {command}. Error: {error_msg}")
             return None
 
-    def upload_file(self, local_path, remote_path):
-        print(f"Uploading file to VM: {self.vmname}: {local_path} -> {remote_path}")
+    def upload(self, local_path, remote_path):
+        print(f"Uploading to VM: {self.vmname}: {local_path} -> {remote_path}")
         try:
-            print("Creating temporary file on remote VM")
-            remote_tmp_file = f"/tmp/{hashlib.sha256((local_path + str(time.time())).encode()).hexdigest()}"
             sftp = self.ssh_connection.open_sftp()
-            sftp.put(local_path, remote_tmp_file)
+
+            if os.path.isdir(local_path):
+                print("Detected directory, performing recursive upload")
+
+                # Create a unique temporary directory on remote
+                remote_tmp_dir = f"/tmp/{hashlib.sha256((local_path + str(time.time())).encode()).hexdigest()}"
+                self.execute_remote_command(f"mkdir -p {remote_tmp_dir}")
+                self.execute_remote_command(f"chmod 777 {remote_tmp_dir}")
+
+                # Recursively upload contents
+                for root, dirs, files in os.walk(local_path):
+                    rel_path = os.path.relpath(root, local_path)
+                    remote_subdir = posixpath.join(remote_tmp_dir, rel_path).replace("\\", "/")
+                    self.execute_remote_command(f"mkdir -p {remote_subdir}")
+                    self.execute_remote_command(f"chmod 777 {remote_subdir}")
+
+                    for filename in files:
+                        local_file = os.path.join(root, filename)
+                        remote_file = posixpath.join(remote_subdir, filename).replace("\\", "/")
+                        sftp.put(local_file, remote_file)
+                        print(f"Uploaded file: {local_file} → {remote_file}")
+
+                # Move temporary directory to final location
+                self.execute_remote_command(f"rm -rf {remote_path}")
+                self.execute_remote_command(f"mv {remote_tmp_dir} {remote_path}")
+                print(f"Successfully uploaded directory {local_path} to {remote_path} on VM: {self.vmname}")
+
+            else:
+                print("Detected file, uploading normally")
+                remote_tmp_file = f"/tmp/{hashlib.sha256((local_path + str(time.time())).encode()).hexdigest()}"
+                sftp.put(local_path, remote_tmp_file)
+                print(f"File uploaded to temporary location: {remote_tmp_file}")
+                self.execute_remote_command(f"mv {remote_tmp_file} {remote_path}")
+                print(f"Successfully uploaded file {local_path} to {remote_path} on VM: {self.vmname}")
+
             sftp.close()
-            print(f"File uploaded to temporary location: {remote_tmp_file}")
-            self.execute_remote_command(f"mv {remote_tmp_file} {remote_path}")
-            print(f"Successfully uploaded {local_path} to {remote_path} on VM: {self.vmname}")
+
         except Exception as e:
             print(f"Failed to upload {local_path} to {remote_path} on VM: {self.vmname}. Error: {e}")
 
@@ -274,7 +305,7 @@ class VMProvisioner:
 
             if instr == "COPY":
                 print(f"\nCopying {step['src']} to {step['dest']}")
-                self.vm.upload_file(step["src"], step["dest"])
+                self.vm.upload(step["src"], step["dest"])
 
             elif instr == "RUN":
                 print(f"\nRunning command: {step['command']} as {step['user']}")
@@ -316,7 +347,7 @@ class VMProvisioner:
         with open(tmp_file, "w") as f:
             f.write("\n".join(service_content))
 
-        self.vm.upload_file(tmp_file, remote_service_file)
+        self.vm.upload(tmp_file, remote_service_file)
         self.vm.execute_remote_command(f"systemctl daemon-reload")
         self.vm.execute_remote_command(f"systemctl enable {service['name']}")
 

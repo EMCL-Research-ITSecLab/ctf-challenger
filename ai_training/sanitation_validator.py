@@ -120,7 +120,7 @@ class TemporalRuleLoader:
                         'username': user['username'],
                         'email': user['email'],
                         'network': ipaddress.ip_network(user['vpn_static_ip'] + '/32'),  # /32 = single IP
-                        'started_at': 0.0,  # Beginning of time
+                        'started_at': 0.0,
                         'stopped_at': float('inf'),  # Forever
                         'is_static_vpn': True
                     })

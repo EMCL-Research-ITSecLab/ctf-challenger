@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Network traffic sanitizer for PCAP files.
-Removes traffic involving specified IP addresses with graph-based spidering.
-Supports .pcap, .gz, and .zip formats with bidirectional flow analysis.
+Network traffic sanitizer for PCAP files with temporal awareness.
+Removes traffic based on user consent and temporal IP assignments.
+Supports .pcap, .gz, and .zip formats with database-driven filtering.
 """
 
 import gzip
@@ -16,14 +16,230 @@ import socket
 import time
 import json
 import ipaddress
+import re
 from collections import deque, defaultdict
 from typing import Dict, Set, List, Tuple, Optional, Any
+from datetime import datetime
+
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    print("Error: psycopg2 is required. Install with: pip install psycopg2-binary")
+    sys.exit(1)
+
+
+class TemporalIPFilter:
+    """Manages time-based IP filtering using database consent and trace data."""
+
+    def __init__(self, db_host: str, db_user: str, db_pass: str, db_name: str = "ctf_challenger"):
+        self.db_host = db_host
+        self.db_user = db_user
+        self.db_pass = db_pass
+        self.db_name = db_name
+        self.conn = None
+        self.temporal_removals: List[Dict[str, Any]] = []
+
+    def connect(self) -> None:
+        """Establish database connection."""
+        try:
+            self.conn = psycopg2.connect(
+                host=self.db_host,
+                user=self.db_user,
+                password=self.db_pass,
+                database=self.db_name
+            )
+            print(f"✓ Connected to database at {self.db_host}")
+        except Exception as e:
+            print(f"Error connecting to database: {e}")
+            sys.exit(1)
+
+    def close(self) -> None:
+        """Close database connection."""
+        if self.conn:
+            self.conn.close()
+
+    def load_removal_rules(self) -> None:
+        """Load IP removal rules based on user consent and temporal assignments."""
+        print("\n" + "=" * 80)
+        print("LOADING REMOVAL RULES FROM DATABASE")
+        print("=" * 80)
+
+        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+
+        cursor.execute("""
+                       SELECT username, email, vpn_static_ip
+                       FROM users
+                       WHERE ai_training_consent = FALSE
+                       """)
+        non_consenting_users = cursor.fetchall()
+
+        print(f"Found {len(non_consenting_users)} users without AI training consent")
+
+        for user in non_consenting_users:
+            if user['vpn_static_ip']:
+                try:
+                    self.temporal_removals.append({
+                        'username': user['username'],
+                        'email': user['email'],
+                        'network': ipaddress.ip_network(user['vpn_static_ip'] + '/32'),
+                        'started_at': 0.0,
+                        'stopped_at': float('inf'),
+                        'is_static_vpn': True
+                    })
+                    print(f"  Static VPN IP: {user['vpn_static_ip']} (always) ({user['username']})")
+                except ValueError:
+                    print(f"Warning: Invalid static VPN IP {user['vpn_static_ip']} for {user['username']}")
+
+            self._trace_user_networks(cursor, user['username'], user['email'])
+
+        cursor.close()
+
+        print(f"Total temporal removal rules: {len(self.temporal_removals)}")
+
+        self.temporal_removals.sort(key=lambda x: x['started_at'])
+
+    def _trace_user_networks(self, cursor, username: str, email: str) -> None:
+        """Trace user through identity history and collect all network assignments."""
+
+        usernames = {username}
+        emails = {email}
+
+        cursor.execute("""
+                       SELECT username_new, email_new
+                       FROM user_identification_history
+                       WHERE username_old = %s
+                          OR email_old = %s
+                       ORDER BY changed_at
+                       """, (username, email))
+
+        for row in cursor.fetchall():
+            if row['username_new']:
+                usernames.add(row['username_new'])
+            if row['email_new']:
+                emails.add(row['email_new'])
+
+        cursor.execute("""
+                       SELECT username_old, email_old
+                       FROM user_identification_history
+                       WHERE username_new = %s
+                          OR email_new = %s
+                       ORDER BY changed_at DESC
+                       """, (username, email))
+
+        for row in cursor.fetchall():
+            if row['username_old']:
+                usernames.add(row['username_old'])
+            if row['email_old']:
+                emails.add(row['email_old'])
+
+        username_list = list(usernames)
+        email_list = list(emails)
+
+        cursor.execute("""
+                       SELECT username, email, started_at, stopped_at, subnet
+                       FROM user_network_trace
+                       WHERE username = ANY (%s)
+                          OR email = ANY (%s)
+                       ORDER BY started_at
+                       """, (username_list, email_list))
+
+        traces = cursor.fetchall()
+
+        for trace in traces:
+            try:
+                network = ipaddress.ip_network(trace['subnet'])
+            except ValueError:
+                print(f"Warning: Invalid subnet {trace['subnet']}")
+                continue
+
+            started_at = trace['started_at'].timestamp()
+            stopped_at = trace['stopped_at'].timestamp() if trace['stopped_at'] else float('inf')
+
+            self.temporal_removals.append({
+                'username': trace['username'],
+                'email': trace['email'],
+                'network': network,
+                'started_at': started_at,
+                'stopped_at': stopped_at,
+                'is_static_vpn': False
+            })
+
+            if trace['stopped_at']:
+                print(f"  Rule: {network} from {trace['started_at']} to {trace['stopped_at']} "
+                      f"({trace['username']})")
+            else:
+                print(f"  Rule: {network} from {trace['started_at']} (ongoing) "
+                      f"({trace['username']})")
+
+    def should_remove_packet(self, ip_str: str, packet_timestamp: float) -> bool:
+        """Check if IP should be removed at given timestamp."""
+        try:
+            ip_addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+
+        for rule in self.temporal_removals:
+            if rule['started_at'] <= packet_timestamp <= rule['stopped_at']:
+                if ip_addr in rule['network']:
+                    return True
+
+        return False
+
+
+def decompress_file(filepath: str) -> Tuple[str, Optional[str]]:
+    """
+    Decompress a .gz or .zip file to a temporary location.
+    Returns (decompressed_path, temp_file_to_cleanup)
+    """
+    if filepath.endswith('.gz'):
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+            temp_file = tmp.name
+        print(f"  Decompressing .gz file...")
+        with gzip.open(filepath, 'rb') as f_in:
+            with open(temp_file, 'wb') as f_out:
+                while True:
+                    chunk = f_in.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+        print(f"  ✓ Decompressed")
+        return temp_file, temp_file
+
+    elif filepath.endswith('.zip'):
+        print(f"  Extracting .zip file...")
+        with zipfile.ZipFile(filepath, 'r') as zip_ref:
+            pcap_files = [name for name in zip_ref.namelist() if name.endswith('.pcap')]
+            if not pcap_files:
+                raise ValueError(f"No .pcap file found in zip archive: {filepath}")
+            if len(pcap_files) > 1:
+                print(f"  Warning: Multiple .pcap files in archive, using first: {pcap_files[0]}")
+
+            pcap_name = pcap_files[0]
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+                temp_file = tmp.name
+
+            with zip_ref.open(pcap_name) as source:
+                with open(temp_file, 'wb') as target:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+        print(f"  ✓ Extracted: {pcap_name}")
+        return temp_file, temp_file
+
+    else:
+        # No decompression needed
+        return filepath, None
 
 
 class PCAPSanitizer:
-    def __init__(self, seed_ips: Set[str], max_depth: int = -1,
+    def __init__(self, temporal_filter: Optional[TemporalIPFilter] = None,
+                 seed_ips: Optional[Set[str]] = None, max_depth: int = -1,
                  allowed_networks: Optional[List[str]] = None):
-        self.seed_ips = seed_ips
+        self.temporal_filter = temporal_filter
+        self.seed_ips = seed_ips or set()
         self.max_depth = max_depth
         self.allowed_networks = self._parse_networks(allowed_networks or ['10.128.0.0/9'])
         self.adjacency: Dict[str, Set[str]] = defaultdict(set)
@@ -75,32 +291,23 @@ class PCAPSanitizer:
     def _analyze_pcap(self, filepath: str) -> None:
         """Analyze a single PCAP file to build adjacency graph."""
         try:
-            temp_file = None
+            decompressed_path, temp_file = decompress_file(filepath)
 
-            if filepath.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_file = tmp.name
-                with gzip.open(filepath, 'rb') as f_in:
-                    with open(temp_file, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                filepath = temp_file
-
-            with open(filepath, 'rb', buffering=1024 * 1024) as f:
-                # Read PCAP header
-                magic = struct.unpack('I', f.read(4))[0]
+            with open(decompressed_path, 'rb', buffering=1024 * 1024) as f:
+                magic_bytes = f.read(4)
+                if len(magic_bytes) < 4:
+                    print(f"Invalid PCAP format (header too short): {filepath}")
+                    return
+                magic = struct.unpack('I', magic_bytes)[0]
                 if magic == 0xa1b2c3d4:
                     endian = '<'
                 elif magic == 0xd4c3b2a1:
                     endian = '>'
                 else:
-                    print(f"Invalid PCAP format: {filepath}")
+                    print(f"Invalid PCAP magic: {hex(magic)} for {filepath}")
                     return
 
-                f.read(20)  # Skip rest of global header
+                f.read(20)
 
                 packet_count = 0
                 while True:
@@ -140,7 +347,7 @@ class PCAPSanitizer:
 
             eth_type = (data[12] << 8) | data[13]
 
-            if eth_type != 0x0800:  # Only IPv4
+            if eth_type != 0x0800:  # IPv4
                 return
 
             ip_data = data[14:]
@@ -150,7 +357,6 @@ class PCAPSanitizer:
             src_ip = socket.inet_ntoa(ip_data[12:16])
             dst_ip = socket.inet_ntoa(ip_data[16:20])
 
-            # Build bidirectional adjacency
             self.adjacency[src_ip].add(dst_ip)
             self.adjacency[dst_ip].add(src_ip)
             self.stats['flows_analyzed'] += 1
@@ -160,18 +366,20 @@ class PCAPSanitizer:
 
     def compute_removal_set(self) -> None:
         """Compute set of IPs to remove using BFS from seed IPs."""
+        if not self.seed_ips:
+            print("\nSkipping graph-based removal (no seed IPs provided)")
+            return
+
         print("\n" + "=" * 80)
         print("COMPUTING REMOVAL SET")
         print("=" * 80)
         print(f"Seed IPs: {len(self.seed_ips)}")
         print(f"Max depth: {'unlimited' if self.max_depth < 0 else self.max_depth}")
 
-        # Initialize BFS queue with seed IPs
         queue = deque()
         visited: Set[str] = set()
         depth: Dict[str, int] = {}
 
-        # Add seeds and their immediate neighbors within allowed networks
         for seed in self.seed_ips:
             if self._ip_in_allowed(seed):
                 if seed not in visited:
@@ -179,14 +387,12 @@ class PCAPSanitizer:
                     depth[seed] = 0
                     queue.append(seed)
             else:
-                # Seed outside allowed network, add its neighbors
                 for neighbor in self.adjacency.get(seed, set()):
                     if self._ip_in_allowed(neighbor) and neighbor not in visited:
                         visited.add(neighbor)
                         depth[neighbor] = 0
                         queue.append(neighbor)
 
-        # BFS traversal
         while queue:
             node = queue.popleft()
             current_depth = depth[node]
@@ -212,11 +418,14 @@ class PCAPSanitizer:
                 print(f"  - {ip}")
 
     def sanitize_pcap(self, input_path: str, output_path: str,
-                      dry_run: bool = False) -> Dict[str, Any]:
-        """Second pass: Write sanitized PCAP file."""
+                      dry_run: bool = False, base_timestamp: Optional[float] = None) -> Dict[str, Any]:
+        """Second pass: Write sanitized PCAP file with temporal filtering."""
         print("\n" + "=" * 80)
         print(f"SANITIZING: {input_path}")
         print("=" * 80)
+
+        if base_timestamp:
+            print(f"Base timestamp: {datetime.fromtimestamp(base_timestamp)}")
 
         if dry_run:
             print("DRY RUN MODE - No output will be written")
@@ -226,38 +435,28 @@ class PCAPSanitizer:
             'output': output_path if not dry_run else None,
             'packets_read': 0,
             'packets_removed': 0,
-            'packets_kept': 0
+            'packets_kept': 0,
+            'base_timestamp': base_timestamp
         }
 
         try:
-            temp_input = None
+            decompressed_input, temp_input = decompress_file(input_path)
+
             temp_output = None
-
-            # Handle compressed input
-            if input_path.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_input = tmp.name
-                with gzip.open(input_path, 'rb') as f_in:
-                    with open(temp_input, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                input_path = temp_input
-
-            # Setup output
             if not dry_run:
-                if output_path.endswith('.gz'):
+                if output_path.endswith('.gz') or output_path.endswith('.zip'):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
                         temp_output = tmp.name
                     actual_output = temp_output
                 else:
                     actual_output = output_path
 
-            with open(input_path, 'rb', buffering=1024 * 1024) as f_in:
-                # Read and write PCAP header
-                magic = struct.unpack('I', f_in.read(4))[0]
+            with open(decompressed_input, 'rb', buffering=1024 * 1024) as f_in:
+                magic_bytes = f_in.read(4)
+                if len(magic_bytes) < 4:
+                    print(f"Invalid PCAP format (header too short): {input_path}")
+                    return result
+                magic = struct.unpack('I', magic_bytes)[0]
                 if magic == 0xa1b2c3d4:
                     endian = '<'
                 elif magic == 0xd4c3b2a1:
@@ -266,7 +465,6 @@ class PCAPSanitizer:
                     print(f"Invalid PCAP format")
                     return result
 
-                # Read rest of header
                 f_in.seek(0)
                 global_header = f_in.read(24)
 
@@ -274,7 +472,6 @@ class PCAPSanitizer:
                     f_out = open(actual_output, 'wb', buffering=1024 * 1024)
                     f_out.write(global_header)
 
-                # Process packets
                 while True:
                     packet_header = f_in.read(16)
                     if len(packet_header) < 16:
@@ -290,8 +487,13 @@ class PCAPSanitizer:
 
                     result['packets_read'] += 1
 
-                    # Check if packet should be removed
-                    if self._should_remove_packet(packet_data):
+                    packet_timestamp = ts_sec + ts_usec / 1000000.0
+                    if base_timestamp:
+                        absolute_timestamp = base_timestamp + packet_timestamp
+                    else:
+                        absolute_timestamp = packet_timestamp
+
+                    if self._should_remove_packet(packet_data, absolute_timestamp):
                         result['packets_removed'] += 1
                     else:
                         result['packets_kept'] += 1
@@ -311,18 +513,45 @@ class PCAPSanitizer:
                       f"removed {result['packets_removed']:,}, "
                       f"kept {result['packets_kept']:,}")
 
-            # Handle compressed output
-            if not dry_run and output_path.endswith('.gz'):
-                with open(temp_output, 'rb') as f_in:
-                    with gzip.open(output_path, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                os.remove(temp_output)
+            if not dry_run:
+                if output_path.endswith('.gz'):
+                    print(f"\n  Compressing output to {output_path}...")
+                    file_size = os.path.getsize(temp_output)
+                    bytes_written = 0
+                    last_print = time.time()
 
-            # Cleanup temp files
+                    with open(temp_output, 'rb') as f_in:
+                        with gzip.open(output_path, 'wb', compresslevel=6) as f_out:
+                            while True:
+                                chunk = f_in.read(8 * 1024 * 1024)
+                                if not chunk:
+                                    break
+                                f_out.write(chunk)
+                                bytes_written += len(chunk)
+
+                                now = time.time()
+                                if now - last_print >= 2.0:
+                                    progress = (bytes_written / file_size) * 100
+                                    mb_written = bytes_written / (1024 * 1024)
+                                    mb_total = file_size / (1024 * 1024)
+                                    print(
+                                        f"  Compression progress: {progress:.1f}% ({mb_written:.1f} MB / {mb_total:.1f} MB)",
+                                        end='\r')
+                                    last_print = now
+
+                    print(f"  ✓ Compressed output written to {output_path}               ")
+                    os.remove(temp_output)
+
+                elif output_path.endswith('.zip'):
+                    print(f"\n  Compressing output to {output_path}...")
+                    base_name = os.path.basename(output_path).replace('.zip', '.pcap')
+
+                    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                        zip_out.write(temp_output, arcname=base_name)
+
+                    print(f"  ✓ Compressed output written to {output_path}")
+                    os.remove(temp_output)
+
             if temp_input and os.path.exists(temp_input):
                 os.remove(temp_input)
 
@@ -333,15 +562,15 @@ class PCAPSanitizer:
 
         return result
 
-    def _should_remove_packet(self, data: bytes) -> bool:
-        """Check if packet involves any IP in removal set."""
+    def _should_remove_packet(self, data: bytes, packet_timestamp: float) -> bool:
+        """Check if packet should be removed based on static and temporal rules."""
         try:
             if len(data) < 14:
                 return False
 
             eth_type = (data[12] << 8) | data[13]
 
-            if eth_type != 0x0800:  # Only IPv4
+            if eth_type != 0x0800:  # IPv4
                 return False
 
             ip_data = data[14:]
@@ -351,7 +580,15 @@ class PCAPSanitizer:
             src_ip = socket.inet_ntoa(ip_data[12:16])
             dst_ip = socket.inet_ntoa(ip_data[16:20])
 
-            return src_ip in self.removal_set or dst_ip in self.removal_set
+            if src_ip in self.removal_set or dst_ip in self.removal_set:
+                return True
+
+            if self.temporal_filter:
+                if (self.temporal_filter.should_remove_packet(src_ip, packet_timestamp) or
+                        self.temporal_filter.should_remove_packet(dst_ip, packet_timestamp)):
+                    return True
+
+            return False
 
         except Exception:
             return False
@@ -363,12 +600,30 @@ class PCAPSanitizer:
         print("SANITIZATION STATISTICS")
         print("=" * 80)
         print(f"Total processing time:      {total_time:.2f}s")
-        print(f"Seed IPs:                   {len(self.seed_ips)}")
-        print(f"Endpoints removed:          {self.stats['endpoints_removed']:,}")
+        if self.seed_ips:
+            print(f"Seed IPs:                   {len(self.seed_ips)}")
+            print(f"Endpoints removed (graph):  {self.stats['endpoints_removed']:,}")
+        if self.temporal_filter:
+            print(f"Temporal rules:             {len(self.temporal_filter.temporal_removals)}")
         print(f"Allowed networks:           {len(self.allowed_networks)}")
         for net in self.allowed_networks:
             print(f"  - {net}")
         print("=" * 80)
+
+
+def extract_timestamp_from_filename(filename: str, cli_timestamp: Optional[float] = None) -> Optional[float]:
+    """Extract base timestamp from filename pattern *.pcap.[timestamp]-* or use CLI override."""
+    if cli_timestamp is not None:
+        return cli_timestamp
+
+    # Pattern: *.pcap.1761107064-2025-10-23-1761230876.gz
+    # Extract first number after .pcap.
+    basename = os.path.basename(filename)
+    match = re.search(r'\.pcap\.(\d+)', basename)
+    if match:
+        return float(match.group(1))
+
+    return None
 
 
 def load_seed_ips(ips_str: Optional[str] = None,
@@ -408,9 +663,10 @@ def merge_pcaps(output_path: str, input_paths: List[str],
             print("Merge aborted")
             return
 
-    is_compressed = output_path.endswith('.gz')
+    is_compressed_gz = output_path.endswith('.gz')
+    is_compressed_zip = output_path.endswith('.zip')
 
-    if is_compressed:
+    if is_compressed_gz or is_compressed_zip:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
             temp_output = tmp.name
         actual_output = temp_output
@@ -423,40 +679,26 @@ def merge_pcaps(output_path: str, input_paths: List[str],
         for input_path in input_paths:
             print(f"Merging: {input_path}")
 
-            temp_input = None
-            if input_path.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_input = tmp.name
-                with gzip.open(input_path, 'rb') as f_in:
-                    with open(temp_input, 'wb') as f_tmp:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_tmp.write(chunk)
-                input_path = temp_input
+            decompressed_path, temp_file = decompress_file(input_path)
 
-            with open(input_path, 'rb') as f_in:
+            with open(decompressed_path, 'rb') as f_in:
                 if first:
-                    # Write global header from first file
                     global_header = f_in.read(24)
                     f_out.write(global_header)
                     first = False
                 else:
-                    # Skip global header for subsequent files
                     f_in.read(24)
-
-                # Copy packet data
                 while True:
                     chunk = f_in.read(1024 * 1024)
                     if not chunk:
                         break
                     f_out.write(chunk)
 
-            if temp_input and os.path.exists(temp_input):
-                os.remove(temp_input)
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
 
-    if is_compressed:
+    if is_compressed_gz:
+        print(f"Compressing merged output to .gz...")
         with open(temp_output, 'rb') as f_in:
             with gzip.open(output_path, 'wb') as f_out:
                 while True:
@@ -465,6 +707,12 @@ def merge_pcaps(output_path: str, input_paths: List[str],
                         break
                     f_out.write(chunk)
         os.remove(temp_output)
+    elif is_compressed_zip:
+        print(f"Compressing merged output to .zip...")
+        base_name = os.path.basename(output_path).replace('.zip', '.pcap')
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            zip_out.write(temp_output, arcname=base_name)
+        os.remove(temp_output)
 
     print(f"✓ Merged {len(input_paths)} files into {output_path}")
 
@@ -472,26 +720,52 @@ def merge_pcaps(output_path: str, input_paths: List[str],
 def main():
     if len(sys.argv) < 2:
         print("Usage: python pcap_sanitizer.py <pcap_file(s)> [options]")
-        print("\nOptions:")
-        print("  --ips <ip,ip,...>         Comma-separated seed IPs to remove")
+        print("\nSupported formats: .pcap, .pcap.gz, .zip")
+        print("\nDatabase Options (for temporal filtering):")
+        print("  --db-host <host>          Database host (default: 10.0.0.102)")
+        print("  --db-user <user>          Database username (required for DB mode)")
+        print("  --db-pass <pass>          Database password (required for DB mode)")
+        print("  --db-name <name>          Database name (default: ctf_challenger)")
+        print("\nStatic Filtering Options:")
+        print("  --ips <ip,ip,...>         Comma-separated seed IPs for graph-based removal")
         print("  --ips-file <file>         File with one IP per line")
-        print("  --out-dir <dir>           Output directory (default: current dir)")
-        print("  --suffix <suffix>         Output filename suffix (default: _cleaned)")
         print("  --max-depth <n>           Max spider depth, -1=unlimited (default: -1)")
         print("  --allowed-network <cidr>  CIDR to constrain spidering (default: 10.128.0.0/9)")
-        print("  --per-file                Build separate graph per file")
+        print("\nTimestamp Options:")
+        print("  --base-timestamp <unix>   Override base timestamp (default: extract from filename)")
+        print("\nOutput Options:")
+        print("  --out-dir <dir>           Output directory (default: current dir)")
+        print("  --suffix <suffix>         Output filename suffix (default: _cleaned)")
         print("  --merge-output <file>     Merge all outputs into single file")
+        print("\nMode Options:")
+        print("  --per-file                Build separate graph per file")
         print("  --dry-run                 Don't write output, show what would be removed")
         print("  --force                   Overwrite existing files without prompting")
         print("  --report <file>           Write JSON report")
         print("\nExamples:")
+        print("  # Database-driven temporal filtering")
+        print("  python pcap_sanitizer.py --db-user admin --db-pass secret traffic.pcap")
+        print("")
+        print("  # Process .zip files")
+        print("  python pcap_sanitizer.py --db-user admin --db-pass secret traffic.zip")
+        print("")
+        print("  # Static IP filtering with graph spidering")
         print("  python pcap_sanitizer.py --ips 192.168.1.100 traffic.pcap")
-        print("  python pcap_sanitizer.py --ips-file bad_ips.txt *.pcap.gz")
-        print("  python pcap_sanitizer.py --ips 10.0.0.1,10.0.0.2 --max-depth 2 file.pcap")
+        print("")
+        print("  # Combined: database temporal + static graph-based")
+        print("  python pcap_sanitizer.py --db-user admin --db-pass secret \\")
+        print("                           --ips 10.0.0.1 --max-depth 2 *.pcap.gz")
+        print("")
+        print("  # Override base timestamp")
+        print("  python pcap_sanitizer.py --db-user admin --db-pass secret \\")
+        print("                           --base-timestamp 1761107064 traffic.pcap")
         sys.exit(1)
 
-    # Parse arguments
     input_files = []
+    db_host = "10.0.0.102"
+    db_user = None
+    db_pass = None
+    db_name = "ctf_challenger"
     ips_str = None
     ips_file = None
     out_dir = '.'
@@ -503,11 +777,24 @@ def main():
     dry_run = False
     force = False
     report_file = None
+    cli_base_timestamp = None
 
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg == '--ips' and i + 1 < len(sys.argv):
+        if arg == '--db-host' and i + 1 < len(sys.argv):
+            db_host = sys.argv[i + 1]
+            i += 2
+        elif arg == '--db-user' and i + 1 < len(sys.argv):
+            db_user = sys.argv[i + 1]
+            i += 2
+        elif arg == '--db-pass' and i + 1 < len(sys.argv):
+            db_pass = sys.argv[i + 1]
+            i += 2
+        elif arg == '--db-name' and i + 1 < len(sys.argv):
+            db_name = sys.argv[i + 1]
+            i += 2
+        elif arg == '--ips' and i + 1 < len(sys.argv):
             ips_str = sys.argv[i + 1]
             i += 2
         elif arg == '--ips-file' and i + 1 < len(sys.argv):
@@ -540,21 +827,17 @@ def main():
         elif arg == '--report' and i + 1 < len(sys.argv):
             report_file = sys.argv[i + 1]
             i += 2
+        elif arg == '--base-timestamp' and i + 1 < len(sys.argv):
+            try:
+                cli_base_timestamp = float(sys.argv[i + 1])
+            except ValueError:
+                print("Error: --base-timestamp must be a number (unix epoch)")
+                sys.exit(1)
+            i += 2
         else:
             input_files.append(arg)
             i += 1
 
-    # Load seed IPs
-    if not ips_str and not ips_file:
-        print("Error: Must provide --ips or --ips-file")
-        sys.exit(1)
-
-    seed_ips = load_seed_ips(ips_str, ips_file)
-    if not seed_ips:
-        print("Error: No seed IPs provided")
-        sys.exit(1)
-
-    # Expand input files
     all_files = []
     for pattern in input_files:
         all_files.extend(glob.glob(pattern))
@@ -563,20 +846,38 @@ def main():
         print("Error: No input files found")
         sys.exit(1)
 
-    # Prepare output paths
+    seed_ips = load_seed_ips(ips_str, ips_file)
+
+    if not seed_ips and not (db_user and db_pass):
+        print("Error: Must provide --ips/--ips-file or database credentials (--db-user and --db-pass)")
+        sys.exit(1)
+
+    temporal_filter = None
+    if db_user and db_pass:
+        temporal_filter = TemporalIPFilter(db_host=db_host, db_user=db_user, db_pass=db_pass, db_name=db_name)
+        temporal_filter.connect()
+        temporal_filter.load_removal_rules()
+    else:
+        temporal_filter = None
+
     os.makedirs(out_dir, exist_ok=True)
     outputs = []
     for inp in all_files:
         base = os.path.basename(inp)
-        name = os.path.splitext(base)[0]
-        if name.endswith('.pcap'):
-            name = name[:-5]
-        ext = '.pcap.gz' if inp.endswith('.gz') else '.pcap'
+        name = base
+        if base.endswith('.pcap.gz'):
+            name = base[:-8]
+            ext = '.pcap.gz'
+        elif base.endswith('.zip'):
+            name = base[:-4]
+            ext = '.zip'
+        else:
+            name = os.path.splitext(base)[0]
+            ext = '.pcap.gz' if base.endswith('.gz') else '.pcap'
         out_name = name + suffix + ext
         out_path = os.path.join(out_dir, out_name)
         outputs.append((inp, out_path))
 
-    # Check for existing files
     if not force and not dry_run:
         existing = [o for (_, o) in outputs if os.path.exists(o)]
         if existing:
@@ -586,6 +887,8 @@ def main():
             response = input("Overwrite? [y/N]: ")
             if response.strip().lower() not in ('y', 'yes'):
                 print("Aborted")
+                if temporal_filter:
+                    temporal_filter.close()
                 sys.exit(0)
 
     print("=" * 80)
@@ -602,41 +905,57 @@ def main():
         print(f"  Merge output:     {merge_output}")
     if dry_run:
         print(f"  DRY RUN MODE")
+    if temporal_filter:
+        print(f"  DB host:          {db_host}")
+        print(f"  DB name:          {db_name}")
     print("=" * 80)
 
     start_time = time.time()
     results = []
 
+    allowed_networks_list = [allowed_network]
+
     if per_file:
-        # Process each file independently
         for inp, outp in outputs:
-            sanitizer = PCAPSanitizer(seed_ips, max_depth, [allowed_network])
-            sanitizer.build_communication_graph([inp])
-            sanitizer.compute_removal_set()
-            result = sanitizer.sanitize_pcap(inp, outp, dry_run)
+            sanitizer = PCAPSanitizer(temporal_filter=temporal_filter,
+                                      seed_ips=seed_ips,
+                                      max_depth=max_depth,
+                                      allowed_networks=allowed_networks_list)
+
+            if seed_ips:
+                sanitizer.build_communication_graph([inp])
+                sanitizer.compute_removal_set()
+            else:
+                print(f"Skipping graph build for {inp} (DB-only mode)")
+
+            base_ts = extract_timestamp_from_filename(inp, cli_base_timestamp)
+            result = sanitizer.sanitize_pcap(inp, outp, dry_run=dry_run, base_timestamp=base_ts)
             results.append(result)
             sanitizer.print_stats()
     else:
-        # Build global graph
-        sanitizer = PCAPSanitizer(seed_ips, max_depth, [allowed_network])
-        sanitizer.build_communication_graph(all_files)
-        sanitizer.compute_removal_set()
+        sanitizer = PCAPSanitizer(temporal_filter=temporal_filter,
+                                  seed_ips=seed_ips,
+                                  max_depth=max_depth,
+                                  allowed_networks=allowed_networks_list)
+        if seed_ips:
+            sanitizer.build_communication_graph(all_files)
+            sanitizer.compute_removal_set()
+        else:
+            print("Skipping graph build (DB-only mode). Using temporal rules only.")
 
-        # Sanitize each file
         for inp, outp in outputs:
-            result = sanitizer.sanitize_pcap(inp, outp, dry_run)
+            base_ts = extract_timestamp_from_filename(inp, cli_base_timestamp)
+            result = sanitizer.sanitize_pcap(inp, outp, dry_run=dry_run, base_timestamp=base_ts)
             results.append(result)
 
         sanitizer.print_stats()
 
-    # Merge if requested
     if merge_output and not dry_run:
         cleaned_files = [o for (_, o) in outputs]
         merge_pcaps(merge_output, cleaned_files, force)
 
     total_time = time.time() - start_time
 
-    # Generate report
     report = {
         'seed_ips': sorted(seed_ips),
         'allowed_network': allowed_network,
@@ -650,6 +969,9 @@ def main():
         with open(report_file, 'w') as f:
             json.dump(report, f, indent=2)
         print(f"\n✓ Report written to {report_file}")
+
+    if temporal_filter:
+        temporal_filter.close()
 
     print("\n" + "=" * 80)
     print("COMPLETED!")

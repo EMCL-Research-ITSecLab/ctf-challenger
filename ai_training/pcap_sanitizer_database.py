@@ -188,6 +188,53 @@ class TemporalIPFilter:
         return False
 
 
+def decompress_file(filepath: str) -> Tuple[str, Optional[str]]:
+    """
+    Decompress a .gz or .zip file to a temporary location.
+    Returns (decompressed_path, temp_file_to_cleanup)
+    """
+    if filepath.endswith('.gz'):
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+            temp_file = tmp.name
+        print(f"  Decompressing .gz file...")
+        with gzip.open(filepath, 'rb') as f_in:
+            with open(temp_file, 'wb') as f_out:
+                while True:
+                    chunk = f_in.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+        print(f"  ✓ Decompressed")
+        return temp_file, temp_file
+
+    elif filepath.endswith('.zip'):
+        print(f"  Extracting .zip file...")
+        with zipfile.ZipFile(filepath, 'r') as zip_ref:
+            pcap_files = [name for name in zip_ref.namelist() if name.endswith('.pcap')]
+            if not pcap_files:
+                raise ValueError(f"No .pcap file found in zip archive: {filepath}")
+            if len(pcap_files) > 1:
+                print(f"  Warning: Multiple .pcap files in archive, using first: {pcap_files[0]}")
+
+            pcap_name = pcap_files[0]
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+                temp_file = tmp.name
+
+            with zip_ref.open(pcap_name) as source:
+                with open(temp_file, 'wb') as target:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+        print(f"  ✓ Extracted: {pcap_name}")
+        return temp_file, temp_file
+
+    else:
+        # No decompression needed
+        return filepath, None
+
+
 class PCAPSanitizer:
     def __init__(self, temporal_filter: Optional[TemporalIPFilter] = None,
                  seed_ips: Optional[Set[str]] = None, max_depth: int = -1,
@@ -245,21 +292,9 @@ class PCAPSanitizer:
     def _analyze_pcap(self, filepath: str) -> None:
         """Analyze a single PCAP file to build adjacency graph."""
         try:
-            temp_file = None
+            decompressed_path, temp_file = decompress_file(filepath)
 
-            if filepath.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_file = tmp.name
-                with gzip.open(filepath, 'rb') as f_in:
-                    with open(temp_file, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                filepath = temp_file
-
-            with open(filepath, 'rb', buffering=1024 * 1024) as f:
+            with open(decompressed_path, 'rb', buffering=1024 * 1024) as f:
                 magic_bytes = f.read(4)
                 if len(magic_bytes) < 4:
                     print(f"Invalid PCAP format (header too short): {filepath}")
@@ -406,32 +441,18 @@ class PCAPSanitizer:
         }
 
         try:
-            temp_input = None
+            decompressed_input, temp_input = decompress_file(input_path)
+
             temp_output = None
-
-            if input_path.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_input = tmp.name
-                print(f"  Decompressing input...")
-                with gzip.open(input_path, 'rb') as f_in:
-                    with open(temp_input, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                input_path = temp_input
-                print(f"  ✓ Decompressed")
-
             if not dry_run:
-                if output_path.endswith('.gz'):
+                if output_path.endswith('.gz') or output_path.endswith('.zip'):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
                         temp_output = tmp.name
                     actual_output = temp_output
                 else:
                     actual_output = output_path
 
-            with open(input_path, 'rb', buffering=1024 * 1024) as f_in:
+            with open(decompressed_input, 'rb', buffering=1024 * 1024) as f_in:
                 magic_bytes = f_in.read(4)
                 if len(magic_bytes) < 4:
                     print(f"Invalid PCAP format (header too short): {input_path}")
@@ -493,34 +514,45 @@ class PCAPSanitizer:
                       f"removed {result['packets_removed']:,}, "
                       f"kept {result['packets_kept']:,}")
 
-            if not dry_run and output_path.endswith('.gz'):
-                print(f"\n  Compressing output to {output_path}...")
-                file_size = os.path.getsize(temp_output)
-                bytes_written = 0
-                last_print = time.time()
+            if not dry_run:
+                if output_path.endswith('.gz'):
+                    print(f"\n  Compressing output to {output_path}...")
+                    file_size = os.path.getsize(temp_output)
+                    bytes_written = 0
+                    last_print = time.time()
 
-                with open(temp_output, 'rb') as f_in:
-                    with gzip.open(output_path, 'wb', compresslevel=6) as f_out:
-                        while True:
-                            chunk = f_in.read(8 * 1024 * 1024)  # 8MB chunks
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                            bytes_written += len(chunk)
+                    with open(temp_output, 'rb') as f_in:
+                        with gzip.open(output_path, 'wb', compresslevel=6) as f_out:
+                            while True:
+                                chunk = f_in.read(8 * 1024 * 1024)
+                                if not chunk:
+                                    break
+                                f_out.write(chunk)
+                                bytes_written += len(chunk)
 
-                            # Print progress every 2 seconds
-                            now = time.time()
-                            if now - last_print >= 2.0:
-                                progress = (bytes_written / file_size) * 100
-                                mb_written = bytes_written / (1024 * 1024)
-                                mb_total = file_size / (1024 * 1024)
-                                print(
-                                    f"  Compression progress: {progress:.1f}% ({mb_written:.1f} MB / {mb_total:.1f} MB)",
-                                    end='\r')
-                                last_print = now
+                                now = time.time()
+                                if now - last_print >= 2.0:
+                                    progress = (bytes_written / file_size) * 100
+                                    mb_written = bytes_written / (1024 * 1024)
+                                    mb_total = file_size / (1024 * 1024)
+                                    print(
+                                        f"  Compression progress: {progress:.1f}% ({mb_written:.1f} MB / {mb_total:.1f} MB)",
+                                        end='\r')
+                                    last_print = now
 
-                print(f"  ✓ Compressed output written to {output_path}               ")
-                os.remove(temp_output)
+                    print(f"  ✓ Compressed output written to {output_path}               ")
+                    os.remove(temp_output)
+
+                elif output_path.endswith('.zip'):
+                    print(f"\n  Compressing output to {output_path}...")
+                    # Extract base name for the file inside the zip
+                    base_name = os.path.basename(output_path).replace('.zip', '.pcap')
+
+                    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                        zip_out.write(temp_output, arcname=base_name)
+
+                    print(f"  ✓ Compressed output written to {output_path}")
+                    os.remove(temp_output)
 
             if temp_input and os.path.exists(temp_input):
                 os.remove(temp_input)
@@ -633,9 +665,10 @@ def merge_pcaps(output_path: str, input_paths: List[str],
             print("Merge aborted")
             return
 
-    is_compressed = output_path.endswith('.gz')
+    is_compressed_gz = output_path.endswith('.gz')
+    is_compressed_zip = output_path.endswith('.zip')
 
-    if is_compressed:
+    if is_compressed_gz or is_compressed_zip:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
             temp_output = tmp.name
         actual_output = temp_output
@@ -648,20 +681,9 @@ def merge_pcaps(output_path: str, input_paths: List[str],
         for input_path in input_paths:
             print(f"Merging: {input_path}")
 
-            temp_input = None
-            if input_path.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_input = tmp.name
-                with gzip.open(input_path, 'rb') as f_in:
-                    with open(temp_input, 'wb') as f_tmp:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_tmp.write(chunk)
-                input_path = temp_input
+            decompressed_path, temp_file = decompress_file(input_path)
 
-            with open(input_path, 'rb') as f_in:
+            with open(decompressed_path, 'rb') as f_in:
                 if first:
                     global_header = f_in.read(24)
                     f_out.write(global_header)
@@ -674,11 +696,11 @@ def merge_pcaps(output_path: str, input_paths: List[str],
                         break
                     f_out.write(chunk)
 
-            if temp_input and os.path.exists(temp_input):
-                os.remove(temp_input)
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
 
-    if is_compressed:
-        print(f"Compressing merged output...")
+    if is_compressed_gz:
+        print(f"Compressing merged output to .gz...")
         with open(temp_output, 'rb') as f_in:
             with gzip.open(output_path, 'wb') as f_out:
                 while True:
@@ -687,6 +709,12 @@ def merge_pcaps(output_path: str, input_paths: List[str],
                         break
                     f_out.write(chunk)
         os.remove(temp_output)
+    elif is_compressed_zip:
+        print(f"Compressing merged output to .zip...")
+        base_name = os.path.basename(output_path).replace('.zip', '.pcap')
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            zip_out.write(temp_output, arcname=base_name)
+        os.remove(temp_output)
 
     print(f"✓ Merged {len(input_paths)} files into {output_path}")
 
@@ -694,6 +722,7 @@ def merge_pcaps(output_path: str, input_paths: List[str],
 def main():
     if len(sys.argv) < 2:
         print("Usage: python pcap_sanitizer.py <pcap_file(s)> [options]")
+        print("\nSupported formats: .pcap, .pcap.gz, .zip")
         print("\nDatabase Options (for temporal filtering):")
         print("  --db-host <host>          Database host (default: 10.0.0.102)")
         print("  --db-user <user>          Database username (required for DB mode)")
@@ -718,6 +747,9 @@ def main():
         print("\nExamples:")
         print("  # Database-driven temporal filtering")
         print("  python pcap_sanitizer.py --db-user admin --db-pass secret traffic.pcap")
+        print("")
+        print("  # Process .zip files")
+        print("  python pcap_sanitizer.py --db-user admin --db-pass secret traffic.zip")
         print("")
         print("  # Static IP filtering with graph spidering")
         print("  python pcap_sanitizer.py --ips 192.168.1.100 traffic.pcap")
@@ -834,11 +866,13 @@ def main():
     outputs = []
     for inp in all_files:
         base = os.path.basename(inp)
-        # Preserve multi-extensions properly (.pcap.gz)
         name = base
         if base.endswith('.pcap.gz'):
             name = base[:-8]
             ext = '.pcap.gz'
+        elif base.endswith('.zip'):
+            name = base[:-4]
+            ext = '.zip'
         else:
             name = os.path.splitext(base)[0]
             ext = '.pcap.gz' if base.endswith('.gz') else '.pcap'

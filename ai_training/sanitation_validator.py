@@ -2,6 +2,7 @@
 """
 PCAP Sanitization Verifier
 Verifies that packets were correctly removed based on temporal and static rules.
+Supports .pcap, .gz, and .zip formats.
 """
 
 import struct
@@ -11,6 +12,7 @@ import sys
 import re
 import os
 import gzip
+import zipfile
 import tempfile
 from datetime import datetime
 from typing import List, Dict, Set, Optional, Tuple
@@ -21,6 +23,53 @@ try:
 except ImportError:
     print("Error: psycopg2 is required. Install with: pip install psycopg2-binary")
     sys.exit(1)
+
+
+def decompress_file(filepath: str) -> Tuple[str, Optional[str]]:
+    """
+    Decompress a .gz or .zip file to a temporary location.
+    Returns (decompressed_path, temp_file_to_cleanup)
+    """
+    if filepath.endswith('.gz'):
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+            temp_file = tmp.name
+        print(f"  Decompressing .gz file...")
+        with gzip.open(filepath, 'rb') as f_in:
+            with open(temp_file, 'wb') as f_out:
+                while True:
+                    chunk = f_in.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+        print(f"  ✓ Decompressed")
+        return temp_file, temp_file
+
+    elif filepath.endswith('.zip'):
+        print(f"  Extracting .zip file...")
+        with zipfile.ZipFile(filepath, 'r') as zip_ref:
+            pcap_files = [name for name in zip_ref.namelist() if name.endswith('.pcap')]
+            if not pcap_files:
+                raise ValueError(f"No .pcap file found in zip archive: {filepath}")
+            if len(pcap_files) > 1:
+                print(f"  Warning: Multiple .pcap files in archive, using first: {pcap_files[0]}")
+
+            pcap_name = pcap_files[0]
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
+                temp_file = tmp.name
+
+            with zip_ref.open(pcap_name) as source:
+                with open(temp_file, 'wb') as target:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+        print(f"  ✓ Extracted: {pcap_name}")
+        return temp_file, temp_file
+
+    else:
+        # No decompression needed
+        return filepath, None
 
 
 class TemporalRuleLoader:
@@ -215,21 +264,9 @@ class PCAPVerifier:
         }
 
         try:
-            temp_file = None
+            decompressed_path, temp_file = decompress_file(filepath)
 
-            if filepath.endswith('.gz'):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pcap') as tmp:
-                    temp_file = tmp.name
-                with gzip.open(filepath, 'rb') as f_in:
-                    with open(temp_file, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-                filepath = temp_file
-
-            with open(filepath, 'rb', buffering=1024 * 1024) as f:
+            with open(decompressed_path, 'rb', buffering=1024 * 1024) as f:
                 magic_bytes = f.read(4)
                 if len(magic_bytes) < 4:
                     print(f"Invalid PCAP format")
@@ -392,6 +429,7 @@ def extract_timestamp_from_filename(filename: str) -> Optional[float]:
 def main():
     if len(sys.argv) < 2:
         print("Usage: python pcap_verifier.py <pcap_file(s)> [options]")
+        print("\nSupported formats: .pcap, .pcap.gz, .zip")
         print("\nDatabase Options:")
         print("  --db-host <host>          Database host (default: 10.0.0.102)")
         print("  --db-user <user>          Database username")
@@ -407,6 +445,9 @@ def main():
         print("\nExamples:")
         print("  # Verify temporal filtering")
         print("  python pcap_verifier.py --db-user admin --db-pass secret cleaned.pcap")
+        print("")
+        print("  # Verify .zip files")
+        print("  python pcap_verifier.py --db-user admin --db-pass secret cleaned.zip")
         print("")
         print("  # Verify static IP removal")
         print("  python pcap_verifier.py --static-ips 192.168.1.100 cleaned.pcap")

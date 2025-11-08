@@ -25,57 +25,98 @@ DNSMASQ_INSTANCES_DIR = "/etc/dnsmasq-instances/"
 os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 
 
+challenge_launch_lock_dir = "/var/lock/challenge_launch_locks/"
+os.makedirs(challenge_launch_lock_dir, exist_ok=True)
+
+
 @retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
        reraise=True)
 def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
-    with db_conn:
-        try:
-            user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
-            user_email = fetch_user_email(user_id, db_conn)
-            challenge_template = ChallengeTemplate(challenge_template_id)
-            fetch_machines(challenge_template, db_conn)
-            fetch_network_and_connection_templates(challenge_template, db_conn)
-            fetch_domain_templates(challenge_template, db_conn)
-            fetch_challenge_flags(challenge_template, db_conn)
-        except Exception as e:
-            raise ValueError(f"Error fetching from database: {e}")
 
-        try:
-            challenge = create_challenge(challenge_template, db_conn)
-        except Exception as e:
-            raise ValueError(f"Error creating challenge: {e}")
+    launch_lock = acquire_exclusive_launch_lock(user_id)
 
-        try:
-            clone_machines(challenge_template, challenge, db_conn)
-            attach_vrtmon_network(challenge)
-            create_networks_and_connections(challenge_template, challenge, user_id, db_conn)
-            create_domains(challenge_template, challenge, db_conn)
-            create_network_devices(challenge)
-            wait_for_networks_to_be_up(challenge)
+    try:
+        with db_conn:
+            try:
+                user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
+                user_email = fetch_user_email(user_id, db_conn)
+                challenge_template = ChallengeTemplate(challenge_template_id)
+                fetch_machines(challenge_template, db_conn)
+                fetch_network_and_connection_templates(challenge_template, db_conn)
+                fetch_domain_templates(challenge_template, db_conn)
+                fetch_challenge_flags(challenge_template, db_conn)
+            except Exception as e:
+                raise ValueError(f"Error fetching from database: {e}")
 
-            # Attach final networks and start VMs
-            attach_networks_to_vms(challenge)
-            start_dnsmasq_instances(challenge, user_vpn_ip)
-            launch_machines(challenge)
+            try:
+                challenge = create_challenge(challenge_template, db_conn)
+            except Exception as e:
+                raise ValueError(f"Error creating challenge: {e}")
 
-            configure_wazuh_for_challenge(challenge)
+            try:
+                clone_machines(challenge_template, challenge, db_conn)
+                attach_vrtmon_network(challenge)
+                create_networks_and_connections(challenge_template, challenge, user_id, db_conn)
+                create_domains(challenge_template, challenge, db_conn)
+                create_network_devices(challenge)
+                wait_for_networks_to_be_up(challenge)
 
-            process_all_user_specific_flags(challenge, user_email)
+                # Attach final networks and start VMs
+                attach_networks_to_vms(challenge)
+                start_dnsmasq_instances(challenge, user_vpn_ip)
+                launch_machines(challenge)
 
-            add_running_challenge_to_user(challenge, user_id, db_conn)
-            add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
+                configure_wazuh_for_challenge(challenge)
 
-        except Exception as e:
-            undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn)
-            raise ValueError(f"Error launching challenge: {e}")
+                process_all_user_specific_flags(challenge, user_email)
 
-        accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
-        accessible_networks.sort()
+                add_running_challenge_to_user(challenge, user_id, db_conn)
+                add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
+
+            except Exception as e:
+                undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn)
+                raise ValueError(f"Error launching challenge: {e}")
+
+            accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
+            accessible_networks.sort()
+    except Exception as e:
+        raise e
+    finally:
+        release_exclusive_launch_lock(user_id, launch_lock)
 
     return accessible_networks
+
+
+def acquire_exclusive_launch_lock(user_id):
+    """
+    Acquire an exclusive lock for launching a challenge for the given user ID.
+    """
+
+    lock_file_path = os.path.join(challenge_launch_lock_dir, f"user_{user_id}.lock")
+    os.makedirs(challenge_launch_lock_dir, exist_ok=True)
+    lock_file = open(lock_file_path, 'w')
+
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception as e:
+        lock_file.close()
+        raise RuntimeError(f"Failed to acquire launch lock for user {user_id}: {e}")
+
+    return lock_file
+
+
+def release_exclusive_launch_lock(user_id, launch_lock):
+    """
+    Release the exclusive lock for launching a challenge for the given user ID.
+    """
+
+    try:
+        fcntl.flock(launch_lock, fcntl.LOCK_UN)
+    finally:
+        launch_lock.close()
 
 
 def fetch_machines(challenge_template, db_conn):

@@ -375,7 +375,12 @@ def main():
     args = parser.parse_args()
 
     build_file_path = args.build_file_path
+    build_script_base_dir = os.path.dirname(os.path.abspath(build_file_path))
+
     output_ova_path = args.output_ova_path
+    output_ova_path = os.path.abspath(output_ova_path)
+
+    os.chdir(build_script_base_dir)
 
     if os.path.exists(output_ova_path):
         if not args.overwrite:

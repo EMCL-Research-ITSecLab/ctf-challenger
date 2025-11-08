@@ -1047,7 +1047,10 @@ def setup_webserver():
     execute_command("sudo chown -R www-data:www-data /var/log/ctf-challenger")
     execute_command("sudo chmod 755 /var/log/ctf-challenger")
 
-
+    print("\tCreating directories for the locks")
+    execute_command("sudo mkdir -p /var/www/deployment_locks")
+    execute_command("sudo chown -R www-data:www-data /var/www/deployment_locks")
+    execute_command("sudo chmod -R 755 /var/www/deployment_locks")
 
     # Copy the backend certificate as trusted
     print("\tCopying backend certificate as trusted")

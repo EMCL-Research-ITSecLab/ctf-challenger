@@ -6,7 +6,7 @@ $securityHelper = new SecurityHelper();
 $securityHelper->initSecureSession();
 
 if (!$securityHelper->validateSession()) {
-    header('Location: /404');
+    header('Location: /login');
     exit();
 }
 ?>

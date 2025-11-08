@@ -198,38 +198,85 @@ class ChallengeHandler
         $this->checkRunningChallenge();
         $this->validateChallengeStatus($challengeId);
 
-        $result = $this->curlHelper->makeBackendRequest(
-            '/launch-challenge',
-            'POST',
-            $this->authHelper->getBackendHeaders(),
-            [
-                'user_id' => $this->userId,
-                'challenge_template_id' => $challengeId
-            ]
-        );
-
-        if (!$result['success'] || $result['http_code'] !== 200) {
-            $errorMsg = $result['error'] ?? "HTTP {$result['http_code']}";
-            $this->logger->logError("Failed to launch challenge - Error: $errorMsg, User ID: $this->userId");
-            throw new CustomException("Failed to launch challenge", 500);
+        $lockFile = $this->acquireDeploymentLock($this->userId);
+        if ($lockFile === false) {
+            throw new CustomException("A deployment is already in progress. Please wait.", 409);
         }
 
-        $responseData = json_decode($result['response'], true);
-        $entrypoints = $responseData['entrypoints'] ?? [];
+        try {
+            $result = $this->curlHelper->makeBackendRequest(
+                '/launch-challenge',
+                'POST',
+                $this->authHelper->getBackendHeaders(),
+                [
+                    'user_id' => $this->userId,
+                    'challenge_template_id' => $challengeId
+                ]
+            );
 
-        $this->startNewAttempt($challengeId);
-        $this->logUserNetworkTraceStart($challengeId);
+            if (!$result['success'] || $result['http_code'] !== 200) {
+                $errorMsg = $result['error'] ?? "HTTP {$result['http_code']}";
+                $this->logger->logError("Failed to launch challenge - Error: $errorMsg, User ID: $this->userId");
+                throw new CustomException("Failed to launch challenge", 500);
+            }
 
-        $this->logger->logDebug("Challenge deployed successfully - ID: $challengeId, User ID: $this->userId");
+            $responseData = json_decode($result['response'], true);
+            $entrypoints = $responseData['entrypoints'] ?? [];
 
-        $this->sendResponse([
-            'success' => true,
-            'message' => 'Challenge deployment initiated',
-            'entrypoints' => $entrypoints,
-            'elapsed_seconds' => $this->challengeHelper->getElapsedSecondsForChallenge($this->pdo,$this->userId,$challengeId),
-            'remaining_seconds' => $this->getRemainingSecondsForChallenge($challengeId),
-            'remaining_extensions' => $this->getRemainingExtensionsForChallenge($challengeId)
-        ]);
+            $this->startNewAttempt($challengeId);
+            $this->logUserNetworkTraceStart($challengeId);
+
+            $this->logger->logDebug("Challenge deployed successfully - ID: $challengeId, User ID: $this->userId");
+
+            $this->sendResponse([
+                'success' => true,
+                'message' => 'Challenge deployment initiated',
+                'entrypoints' => $entrypoints,
+                'elapsed_seconds' => $this->challengeHelper->getElapsedSecondsForChallenge($this->pdo,$this->userId,$challengeId),
+                'remaining_seconds' => $this->getRemainingSecondsForChallenge($challengeId),
+                'remaining_extensions' => $this->getRemainingExtensionsForChallenge($challengeId)
+            ]);
+        } finally {
+            $this->releaseDeploymentLock($lockFile);
+        }
+    }
+
+    private function acquireDeploymentLock(int $userId)
+    {
+        $lockDir = '/var/www/deployment_locks';
+
+        if (!is_dir($lockDir)) {
+            mkdir($lockDir, 0755, true);
+        }
+
+        $lockPath = $lockDir . "/user_{$userId}.lock";
+
+        $fp = fopen($lockPath, 'c');
+
+        if ($fp === false) {
+            $this->logger->logError("Failed to create lock file for user {$userId}");
+            return false;
+        }
+
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            $this->logger->logDebug("Lock already held for user {$userId}");
+            return false;
+        }
+
+        ftruncate($fp, 0);
+        fwrite($fp, "PID: " . getmypid() . "\nTime: " . date('Y-m-d H:i:s') . "\n");
+        fflush($fp);
+
+        return $fp;
+    }
+
+    private function releaseDeploymentLock($lockFile): void
+    {
+        if ($lockFile !== false && is_resource($lockFile)) {
+            flock($lockFile, LOCK_UN);
+            fclose($lockFile);
+        }
     }
 
     /**

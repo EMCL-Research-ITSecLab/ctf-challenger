@@ -562,6 +562,45 @@ def import_external_dashboards(headers):
 
 
 @time_function
+def import_systemd_dashboard(headers):
+    """Import systemd services dashboard"""
+    log_section("Importing Systemd Services Dashboard")
+
+    systemd_dashboard_file = f"{GRAFANA_FILES_SETUP_DIR}/config/systemd_dashboard.json"
+
+    try:
+        systemd_dashboard_data = replace_placeholders_in_file(systemd_dashboard_file, {})
+
+        if not systemd_dashboard_data:
+            log_error("Failed to load systemd dashboard file")
+            return
+
+        prometheus_uid = get_datasource_uid(headers, DATASOURCE_NAME)
+        if not prometheus_uid:
+            log_error("Could not find Prometheus datasource UID")
+            return
+
+        dashboard_str = json.dumps(systemd_dashboard_data)
+        dashboard_str = dashboard_str.replace("${DS_PROMETHEUS}", prometheus_uid)
+        updated_dashboard = json.loads(dashboard_str)
+
+        import_payload = {
+            "dashboard": updated_dashboard["dashboard"],
+            "overwrite": updated_dashboard.get("overwrite", True),
+            "inputs": updated_dashboard.get("inputs", [])
+        }
+
+        imp_resp = requests.post(f"{GRAFANA_URL}/api/dashboards/db", headers=headers, json=import_payload)
+        if imp_resp.status_code in (200, 201):
+            log_success("Imported: Systemd Services Dashboard")
+        else:
+            log_error(f"Failed to import systemd dashboard: {imp_resp.text}")
+
+    except Exception as e:
+        log_error(f"Error importing systemd dashboard: {e}")
+
+
+@time_function
 def main():
     """Main execution function"""
     global DEBUG_MODE
@@ -597,6 +636,8 @@ def main():
             setup_clickhouse(headers)
 
             import_external_dashboards(headers)
+
+            import_systemd_dashboard(headers)
 
         log_success("All Grafana operations completed successfully")
 

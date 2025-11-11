@@ -84,6 +84,7 @@ IP_ADDRESS=$(hostname -I | awk '{print $1}')
 RAM_MIN=8388608
 RAM=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 
+
 if [ $RAM -le $RAM_MIN ]; then
     print_warning "Not Enough Memory! MINIMUM: $RAM_MIN, Current: $RAM"
     echo "Ignore warning? [y/yes]"

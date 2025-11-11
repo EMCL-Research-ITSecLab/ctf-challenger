@@ -11,13 +11,14 @@ import sys
 import argparse
 from proxmoxer import ProxmoxAPI
 from dotenv import load_dotenv
+
 sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/ctf-challenger/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
-IPTABLES_FILE = os.getenv("IPTABLES_FILE","/etc/iptables-backend/iptables.sh")
+IPTABLES_FILE = os.getenv("IPTABLES_FILE", "/etc/iptables-backend/iptables.sh")
 
 # Import the script_helper module
 sys.path.append(UTILS_DIR)
@@ -62,6 +63,7 @@ PROXMOX_EXPORTER_TOKEN_NAME = os.getenv("PROXMOX_EXPORTER_TOKEN_NAME", "pve_expo
 PVE_EXPORTER_DIR = os.getenv("PVE_EXPORTER_DIR", "/etc/pve-exporter")
 PVE_EXPORTER_ENV = f"{PVE_EXPORTER_DIR}/.env"
 PROXMOX_PORT = os.getenv("PROXMOX_PORT", "8006")
+PROXMOX_NODE_EXPORTER_PORT = os.getenv("PROXMOX_NODE_EXPORTER_PORT", "9101")
 
 # Proxmox API connection settings
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "localhost")
@@ -388,11 +390,23 @@ scrape_configs:
   - job_name: 'monitoring-vm'
     static_configs:
       - targets: ['localhost:{MONITORING_VM_EXPORTER_PORT}']
+        labels:
+          instance: 'monitoring-vm'
+          node_type: 'monitoring'
 
-  - job_name: 'proxmox'
+  - job_name: 'proxmox-node'
+    static_configs:
+      - targets: ['{PROXMOX_IP}:{PROXMOX_NODE_EXPORTER_PORT}']
+        labels:
+          instance: 'proxmox-host'
+          node_type: 'hypervisor'
+
+  - job_name: 'proxmox-pve'
     metrics_path: '/pve'
     static_configs:
       - targets: ['{PROXMOX_IP}:{PROXMOX_EXPORTER_PORT}']
+        labels:
+          instance: 'proxmox-api'
 
   - job_name: 'apache'
     metrics_path: '/metrics'
@@ -402,15 +416,23 @@ scrape_configs:
   - job_name: 'webserver-node'
     static_configs:
       - targets: ['{FRONTEND_IP}:{WEBSERVER_VM_EXPORTER_PORT}']
+        labels:
+          instance: 'webserver'
+          node_type: 'application'
 
-  - job_name: 'database_server-node'
+  - job_name: 'database-node'
     static_configs:
       - targets: ['{DATABASE_IP}:{DATABASE_VM_EXPORTER_PORT}']
+        labels:
+          instance: 'database-server'
+          node_type: 'database'
 
   - job_name: 'postgres'
     metrics_path: '/metrics'
     static_configs:
       - targets: ['{DATABASE_IP}:{POSTGRES_EXPORTER_PORT}']
+        labels:
+          instance: 'database-server'
 """
 
     with open("prometheus.yml", "w") as f:
@@ -429,7 +451,7 @@ scrape_configs:
     for cmd in commands:
         execute_remote_command_with_key(VM_IP, cmd, SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE)
 
-    log_success("Prometheus configuration completed")
+    log_success("Prometheus configuration with systemd targets completed")
 
 
 @time_function
@@ -448,7 +470,14 @@ def setup_node_exporter():
     for cmd in commands:
         execute_remote_command_with_key(VM_IP, cmd, SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE, shell=True)
 
-    node_exporter_service = """[Unit]
+    systemd_units = [
+        "docker.service",
+        "clickhouse-server.service",
+        "banner-server.service"
+    ]
+    unit_filter = "|".join(systemd_units)
+
+    node_exporter_service = f"""[Unit]
 Description=Node Exporter
 Wants=network-online.target
 After=network-online.target
@@ -457,7 +486,9 @@ After=network-online.target
 User=prometheus
 Group=prometheus
 Type=simple
-ExecStart=/usr/local/bin/node_exporter
+ExecStart=/usr/local/bin/node_exporter \\
+    --collector.systemd \\
+    --collector.systemd.unit-include='{unit_filter}'
 
 [Install]
 WantedBy=default.target
@@ -478,7 +509,104 @@ WantedBy=default.target
     for cmd in commands:
         execute_remote_command_with_key(VM_IP, cmd, SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE)
 
+    time.sleep(2)
+    try:
+        execute_remote_command_with_key(
+            VM_IP,
+            "curl -s http://localhost:9100/metrics | grep systemd_unit_state | head -5",
+            SSH_USER,
+            ssh_key_path=PROXMOX_SSH_KEYFILE
+        )
+        log_success("Node Exporter with systemd collector setup completed")
+    except Exception as e:
+        log_warning(f"Could not verify systemd metrics, but service is running: {e}")
+
     log_success("Node Exporter setup completed")
+
+
+@time_function
+def setup_node_exporter_on_proxmox():
+    """Install Node Exporter with systemd collector on Proxmox host"""
+    log_section("Setting up Node Exporter with systemd collector on Proxmox Host")
+
+    commands = [
+        "wget -q https://github.com/prometheus/node_exporter/releases/download/v1.9.1/node_exporter-1.9.1.linux-amd64.tar.gz",
+        "tar -xzf node_exporter-1.9.1.linux-amd64.tar.gz",
+        "cp node_exporter-1.9.1.linux-amd64/node_exporter /usr/local/bin/",
+        "chmod +x /usr/local/bin/node_exporter",
+        "useradd --no-create-home --shell /usr/sbin/nologin prometheus 2>/dev/null || true",
+        "rm -rf node_exporter-1.9.1.linux-amd64*"
+    ]
+
+    for cmd in commands:
+        run_cmd(cmd, check=True, shell=True)
+
+    proxmox_units = [
+        "suricata-vpn.service",
+        "suricata-dmz.service",
+        "suricata-backend.service",
+        "zeek.service",
+        "vector-vpn.service",
+        "vector-dmz.service",
+        "vector-backend.service",
+        "vector-zeek.service"
+    ]
+    unit_filter = "|".join(proxmox_units)
+
+    service_content = f"""[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/node_exporter \\
+    --web.listen-address={PROXMOX_IP}:{PROXMOX_NODE_EXPORTER_PORT} \\
+    --collector.systemd \\
+    --collector.systemd.unit-include='{unit_filter}'
+
+[Install]
+WantedBy=default.target
+"""
+
+    with open("/etc/systemd/system/node_exporter.service", "w") as f:
+        f.write(service_content)
+
+    commands = [
+        "systemctl daemon-reload",
+        "systemctl enable node_exporter",
+        "systemctl start node_exporter"
+    ]
+
+    for cmd in commands:
+        run_cmd(cmd.split(), check=True)
+
+    time.sleep(2)
+    try:
+        result = run_cmd(
+            f"curl -s http://{PROXMOX_IP}:{PROXMOX_NODE_EXPORTER_PORT}/metrics | grep 'node_exporter_build_info'",
+            check=True,
+            shell=True,
+            capture_output=True
+        )
+        log_info(f"Node Exporter on Proxmox running on port {PROXMOX_NODE_EXPORTER_PORT}")
+
+        result = run_cmd(
+            f"curl -s http://{PROXMOX_IP}:{PROXMOX_NODE_EXPORTER_PORT}/metrics | grep systemd_unit_state | head -5",
+            check=False,
+            shell=True,
+            capture_output=True
+        )
+        if result.stdout:
+            log_success("Systemd metrics confirmed")
+
+    except Exception as e:
+        log_error("Node Exporter verification failed")
+        raise
+
+    log_success("Node Exporter on Proxmox host setup completed")
 
 
 @time_function
@@ -578,6 +706,7 @@ def setup_node_exporter_on_webserver():
 
     log_success("Node Exporter on web server setup completed")
 
+
 @time_function
 def setup_pve_exporter_token():
     """
@@ -632,7 +761,7 @@ def setup_proxmox_exporter():
 [Unit]
 Description=Prometheus exporter for Proxmox VE
 After=network.target
-apt install
+
 [Service]
 Type=simple
 User=root
@@ -810,16 +939,17 @@ def verify_services():
     """Verify all monitoring services are running correctly"""
     log_section("Verifying Services")
 
-    # Check Proxmox exporter service
+    # Check Proxmox exporter services
     local_commands = [
-        "systemctl is-active prometheus-pve-exporter"
+        "systemctl is-active prometheus-pve-exporter",
+        "systemctl is-active node_exporter"
     ]
 
     for cmd in local_commands:
         try:
             run_cmd(cmd.split(), check=True)
         except Exception as e:
-            raise Exception(f"Proxmox exporter service check failed: {cmd}")
+            raise Exception(f"Proxmox service check failed: {cmd}")
 
     # Check monitoring VM services
     vm_commands = [
@@ -888,7 +1018,6 @@ def configure_proxmox_iptables():
     log_success("Proxmox iptables configuration completed")
 
 
-
 @time_function
 def cleanup_on_failure():
     """Clean up monitoring VM if setup fails"""
@@ -912,7 +1041,14 @@ def setup_monitoring_stack():
             import_monitoring_vm()
 
             log_info("2. Changing default password and generation SSH keyfile")
-            remote_setup_user_ssh_keys(ip=VM_IP,username=SSH_USER,keyfile=f"{PROXMOX_SSH_KEYFILE}.pub",old_password=DEFAULT_SSH_PASSWORD,new_password=NEW_SSH_PASSWORD,admin_user=SSH_USER)
+            remote_setup_user_ssh_keys(
+                ip=VM_IP,
+                username=SSH_USER,
+                keyfile=f"{PROXMOX_SSH_KEYFILE}.pub",
+                old_password=DEFAULT_SSH_PASSWORD,
+                new_password=NEW_SSH_PASSWORD,
+                admin_user=SSH_USER
+            )
 
             log_info("3. Installing required packages")
             install_packages()
@@ -923,26 +1059,31 @@ def setup_monitoring_stack():
             log_info("5. Setting up Prometheus")
             setup_prometheus()
 
-            log_info("6. Configuring Prometheus and exporters")
-            configure_prometheus_yml()
+            log_info("6.1 Setting up Node Exporter on Monitoring VM (with systemd)")
             setup_node_exporter()
 
-            log_info("6.1 Setting up Apache Exporter on web server")
+            log_info("6.2 Setting up Node Exporter on Proxmox Host (with systemd)")
+            setup_node_exporter_on_proxmox()
+
+            log_info("6.3 Configuring Prometheus targets")
+            configure_prometheus_yml()
+
+            log_info("6.4 Setting up Apache Exporter on web server")
             setup_apache_exporter()
 
-            log_info("6.2 Setting up Node Exporter on web server")
+            log_info("6.5 Setting up Node Exporter on web server")
             setup_node_exporter_on_webserver()
 
-            log_info("6.3.1 Setting up AuthToken for Proxmox Exporter")
+            log_info("6.6.1 Setting up AuthToken for Proxmox Exporter")
             setup_pve_exporter_token()
 
-            log_info("6.3.2 Setting up Proxmox Exporter")
+            log_info("6.6.2 Setting up Proxmox Exporter")
             setup_proxmox_exporter()
 
-            log_info("6.4 Setting up Postgres Exporter")
+            log_info("6.7 Setting up Postgres Exporter")
             setup_postgres_exporter()
 
-            log_info("6.5 Setting up Node Exporter on database server")
+            log_info("6.8 Setting up Node Exporter on database server")
             setup_node_exporter_on_database_server()
 
             log_info("7. Configuring firewall")

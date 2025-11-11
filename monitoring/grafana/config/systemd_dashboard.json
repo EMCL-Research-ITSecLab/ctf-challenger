@@ -1,0 +1,645 @@
+{
+  "dashboard": {
+    "title": "Systemd Services Monitoring",
+    "tags": ["systemd", "services", "monitoring"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Services Status Overview",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 0},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "count(node_systemd_unit_state{state=\"active\"} == 1)",
+            "legendFormat": "Active Services",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "count(node_systemd_unit_state{state=\"failed\"} == 1)",
+            "legendFormat": "Failed Services",
+            "refId": "B",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "count(node_systemd_unit_state{state=\"inactive\"} == 1)",
+            "legendFormat": "Inactive Services",
+            "refId": "C",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 1, "color": "red"}
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Failed Services"},
+              "properties": [
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"value": null, "color": "green"},
+                      {"value": 1, "color": "red"}
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 2,
+        "type": "stat",
+        "title": "Security Node (proxmox-host) - Suricata Services",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"suricata-vpn.service\", state=\"active\"}",
+            "legendFormat": "Suricata VPN",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"suricata-dmz.service\", state=\"active\"}",
+            "legendFormat": "Suricata DMZ",
+            "refId": "B",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"suricata-backend.service\", state=\"active\"}",
+            "legendFormat": "Suricata Backend",
+            "refId": "C",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"zeek.service\", state=\"active\"}",
+            "legendFormat": "Zeek",
+            "refId": "D",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "DOWN", "color": "red"},
+                  "1": {"text": "RUNNING", "color": "green"}
+                }
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 3,
+        "type": "stat",
+        "title": "Security Node (proxmox-host) - Vector Services",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"vector-vpn.service\", state=\"active\"}",
+            "legendFormat": "Vector VPN",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"vector-backend.service\", state=\"active\"}",
+            "legendFormat": "Vector Backend",
+            "refId": "B",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"vector-dmz.service\", state=\"active\"}",
+            "legendFormat": "Vector DMZ",
+            "refId": "C",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=\"vector-zeek.service\", state=\"active\"}",
+            "legendFormat": "Vector Zeek",
+            "refId": "D",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "DOWN", "color": "red"},
+                  "1": {"text": "RUNNING", "color": "green"}
+                }
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 4,
+        "type": "stat",
+        "title": "Monitoring Node (monitoring-vm) - Services",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 14},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{instance=~\"monitoring-vm.*\", name=\"docker.service\", state=\"active\"}",
+            "legendFormat": "Docker",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"monitoring-vm.*\", name=\"clickhouse-server.service\", state=\"active\"}",
+            "legendFormat": "ClickHouse Server",
+            "refId": "B",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          },
+          {
+            "expr": "node_systemd_unit_state{instance=~\"monitoring-vm.*\", name=\"banner-server.service\", state=\"active\"}",
+            "legendFormat": "Banner Server",
+            "refId": "C",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "DOWN", "color": "red"},
+                  "1": {"text": "RUNNING", "color": "green"}
+                }
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 5,
+        "type": "table",
+        "title": "Failed Services Alert",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 14},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{state=\"failed\"} == 1",
+            "format": "table",
+            "instant": true,
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true,
+                "__name__": true,
+                "job": true,
+                "state": false,
+                "Value": true
+              },
+              "renameByName": {
+                "instance": "Host",
+                "name": "Failed Service",
+                "state": "State"
+              }
+            }
+          }
+        ],
+        "options": {
+          "showHeader": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left"
+            },
+            "color": {
+              "mode": "fixed",
+              "fixedColor": "red"
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "type": "timeseries",
+        "title": "Security Services Timeline - proxmox-host",
+        "gridPos": {"h": 10, "w": 24, "x": 0, "y": 20},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{instance=~\"proxmox-host.*\", name=~\"suricata-vpn.service|suricata-dmz.service|suricata-backend.service|zeek.service|vector-vpn.service|vector-backend.service|vector-dmz.service|vector-zeek.service\", state=\"active\"}",
+            "legendFormat": "{{name}}",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "calcs": ["last", "min", "max"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "spanNulls": false,
+              "drawStyle": "line",
+              "pointSize": 5,
+              "lineInterpolation": "stepAfter"
+            },
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "Down", "color": "red"},
+                  "1": {"text": "Up", "color": "green"}
+                }
+              }
+            ],
+            "min": -0.1,
+            "max": 1.1,
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "type": "timeseries",
+        "title": "Monitoring Services Timeline - monitoring-vm",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{instance=~\"monitoring-vm.*\", name=~\"docker.service|clickhouse-server.service|banner-server.service\", state=\"active\"}",
+            "legendFormat": "{{name}}",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi",
+            "sort": "none"
+          },
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "calcs": ["last", "min", "max"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "spanNulls": false,
+              "drawStyle": "line",
+              "pointSize": 5,
+              "lineInterpolation": "stepAfter"
+            },
+            "mappings": [
+              {
+                "type": "value",
+                "options": {
+                  "0": {"text": "Down", "color": "red"},
+                  "1": {"text": "Up", "color": "green"}
+                }
+              }
+            ],
+            "min": -0.1,
+            "max": 1.1,
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 8,
+        "type": "table",
+        "title": "All Monitored Services - Detailed View",
+        "gridPos": {"h": 12, "w": 24, "x": 0, "y": 38},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "targets": [
+          {
+            "expr": "node_systemd_unit_state{name=~\"suricata-vpn.service|suricata-dmz.service|suricata-backend.service|zeek.service|vector-vpn.service|vector-backend.service|vector-dmz.service|vector-zeek.service|docker.service|clickhouse-server.service|banner-server.service\"} == 1",
+            "format": "table",
+            "instant": true,
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            }
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true,
+                "__name__": true,
+                "job": true,
+                "Value": true,
+                "type": true
+              },
+              "indexByName": {
+                "instance": 0,
+                "name": 1,
+                "state": 2
+              },
+              "renameByName": {
+                "instance": "Host",
+                "name": "Service",
+                "state": "Status"
+              }
+            }
+          }
+        ],
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "displayName": "Host",
+              "desc": false
+            }
+          ]
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto",
+              "filterable": true
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Status"},
+              "properties": [
+                {
+                  "id": "custom.displayMode",
+                  "value": "color-background"
+                },
+                {
+                  "id": "mappings",
+                  "value": [
+                    {
+                      "type": "value",
+                      "options": {
+                        "active": {
+                          "text": "✅ RUNNING",
+                          "color": "dark-green"
+                        },
+                        "inactive": {
+                          "text": "⚪ INACTIVE",
+                          "color": "dark-gray"
+                        },
+                        "failed": {
+                          "text": "❌ FAILED",
+                          "color": "dark-red"
+                        },
+                        "activating": {
+                          "text": "🔄 STARTING",
+                          "color": "dark-yellow"
+                        },
+                        "deactivating": {
+                          "text": "🔄 STOPPING",
+                          "color": "dark-orange"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "8.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    }
+  ]
+}

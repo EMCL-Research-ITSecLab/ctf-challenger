@@ -43,6 +43,7 @@ CLICKHOUSE_DASHBOARD_DMZ_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/clickhouse_da
 CLICKHOUSE_DASHBOARD_BACKEND_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/clickhouse_dashboard_backend.json"
 CLICKHOUSE_DASHBOARD_ZEEK_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/clickhouse_dashboard_vpn_zeek.json"
 WAZUH_DASHBOARD_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/wazuh_dashboard.json"
+SYSTEMD_DASHBOARD_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/systemd_dashboard.json"
 
 # SSL/TLS certificate paths
 CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/ctf-challenger/setup/certs")
@@ -460,6 +461,73 @@ def update_wazuh_dashboard(session, datasource_uid=None):
     return update_dashboard(session, wrapped_dashboard, "Updated Wazuh dashboard")
 
 
+def update_systemd_dashboard(session, datasource_uid=None):
+    """Update Systemd Services dashboard"""
+    log_info("Updating Systemd Services dashboard...")
+
+    # Get Prometheus datasource UID if not provided
+    if not datasource_uid:
+        datasource_uid = get_datasource_uid_by_name(session, "Prometheus")
+        if not datasource_uid:
+            log_error("Could not find Prometheus datasource. Please provide UID manually.")
+            return False
+
+    log_info(f"Using Prometheus datasource UID: {datasource_uid}")
+
+    if not os.path.exists(SYSTEMD_DASHBOARD_FILE):
+        log_error(f"Systemd dashboard file not found: {SYSTEMD_DASHBOARD_FILE}")
+        return False
+
+    dashboard_data = load_dashboard_file(SYSTEMD_DASHBOARD_FILE)
+
+    if not dashboard_data:
+        return False
+
+    # Replace datasource references - handle both formats
+    dashboard_data = replace_datasource_references(
+        dashboard_data,
+        "${DS_PROMETHEUS}",
+        datasource_uid
+    )
+    dashboard_data = replace_datasource_references(
+        dashboard_data,
+        "$DS_PROMETHEUS",
+        datasource_uid
+    )
+
+    # Extract just the dashboard object if it's wrapped
+    if "dashboard" in dashboard_data:
+        actual_dashboard = dashboard_data["dashboard"]
+    else:
+        actual_dashboard = dashboard_data
+
+    # Get the dashboard title
+    dashboard_title = actual_dashboard.get("title", "Systemd Services Monitoring")
+
+    # Search for existing dashboard by title
+    log_debug(f"Searching for existing dashboard: {dashboard_title}")
+    existing = search_dashboard_by_title(session, dashboard_title)
+
+    if existing:
+        log_info(f"Found existing dashboard '{dashboard_title}' with UID: {existing['uid']}")
+        # Preserve the existing UID and version
+        actual_dashboard["uid"] = existing["uid"]
+        # Get the full dashboard to preserve version
+        full_existing = get_dashboard_by_uid(session, existing["uid"])
+        if full_existing and "dashboard" in full_existing:
+            actual_dashboard["version"] = full_existing["dashboard"].get("version", 0)
+    else:
+        log_info(f"No existing dashboard found for '{dashboard_title}', will create new")
+        # Remove uid if present to let Grafana generate one
+        if "uid" in actual_dashboard:
+            del actual_dashboard["uid"]
+
+    # Wrap it properly
+    wrapped_dashboard = {"dashboard": actual_dashboard}
+
+    return update_dashboard(session, wrapped_dashboard, "Updated Systemd Services dashboard")
+
+
 def update_specific_dashboard(session, uid_or_title, filepath, datasource_uid=None, datasource_placeholder=None):
     """Update a specific dashboard by UID or title"""
     log_info(f"Updating dashboard: {uid_or_title}")
@@ -511,9 +579,10 @@ def interactive_mode(session):
     print("\nOptions:")
     print("  1. Update all ClickHouse dashboards")
     print("  2. Update Wazuh dashboard")
-    print("  3. Update specific dashboard by number")
-    print("  4. List datasources")
-    print("  5. Exit")
+    print("  3. Update Systemd Services dashboard")
+    print("  4. Update specific dashboard by number")
+    print("  5. List datasources")
+    print("  6. Exit")
 
     choice = input("\nSelect option: ").strip()
 
@@ -522,6 +591,8 @@ def interactive_mode(session):
     elif choice == "2":
         update_wazuh_dashboard(session)
     elif choice == "3":
+        update_systemd_dashboard(session)
+    elif choice == "4":
         dash_num = input("Enter dashboard number: ").strip()
         try:
             idx = int(dash_num) - 1
@@ -534,9 +605,9 @@ def interactive_mode(session):
                 log_error("Invalid dashboard number")
         except ValueError:
             log_error("Invalid input")
-    elif choice == "4":
-        list_datasources(session)
     elif choice == "5":
+        list_datasources(session)
+    elif choice == "6":
         return
     else:
         log_error("Invalid choice")
@@ -575,6 +646,9 @@ Examples:
   # Update Wazuh dashboard
   python update_dashboards.py --wazuh
   
+  # Update Systemd dashboard
+  python update_dashboards.py --systemd
+  
   # Update specific dashboard
   python update_dashboards.py --dashboard "VPN Network Traffic" --file /path/to/dashboard.json
   
@@ -587,6 +661,7 @@ Examples:
     parser.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
     parser.add_argument("--clickhouse", action="store_true", help="Update all ClickHouse dashboards")
     parser.add_argument("--wazuh", action="store_true", help="Update Wazuh dashboard")
+    parser.add_argument("--systemd", action="store_true", help="Update Systemd Services dashboard")
     parser.add_argument("--list", action="store_true", help="List all dashboards")
     parser.add_argument("--list-datasources", action="store_true", help="List all datasources")
     parser.add_argument("--dashboard", help="Dashboard UID or title to update")
@@ -624,6 +699,8 @@ Examples:
         update_clickhouse_dashboards(session, args.datasource_uid)
     elif args.wazuh:
         update_wazuh_dashboard(session, args.datasource_uid)
+    elif args.systemd:
+        update_systemd_dashboard(session, args.datasource_uid)
     elif args.dashboard and args.file:
         update_specific_dashboard(
             session,

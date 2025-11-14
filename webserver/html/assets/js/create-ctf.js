@@ -21,6 +21,7 @@ class CTFCreator {
             this.setupImageUpload();
             this.updateLayout();
             this.updateFlagOrderInput();
+            this.initYAMLToggle();
         });
     }
 
@@ -1580,6 +1581,741 @@ class CTFCreator {
             }
         };
     }
+
+    initYAMLToggle() {
+        this.yamlMode = false;
+        this.yamlData = null;
+
+        this.viewModeToggle = document.getElementById('view-mode-toggle');
+        this.yamlUploadView = document.getElementById('yaml-upload-view');
+        this.manualCreationView = document.getElementById('manual-creation-view');
+        this.yamlDropZone = document.getElementById('yaml-drop-zone');
+        this.yamlFileInput = document.getElementById('yaml-file-input');
+        this.yamlFileInfo = document.getElementById('yaml-file-info');
+        this.yamlClearBtn = document.getElementById('yaml-clear-btn');
+        this.yamlImportBtn = document.getElementById('yaml-import-btn');
+        this.yamlDownloadTemplate = document.getElementById('yaml-download-template');
+
+        this.viewModeToggle.addEventListener('click', () => this.toggleViewMode());
+
+        this.yamlDropZone.addEventListener('click', () => this.yamlFileInput.click());
+        this.yamlFileInput.addEventListener('change', (e) => this.handleYAMLFileSelect(e));
+
+        this.yamlDropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            this.yamlDropZone.classList.add('drag-over');
+        });
+
+        this.yamlDropZone.addEventListener('dragleave', () => {
+            this.yamlDropZone.classList.remove('drag-over');
+        });
+
+        this.yamlDropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            this.yamlDropZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                this.handleYAMLFile(files[0]);
+            }
+        });
+
+        this.yamlClearBtn.addEventListener('click', () => this.clearYAMLFile());
+        this.yamlImportBtn.addEventListener('click', () => this.importYAMLConfiguration());
+        this.yamlDownloadTemplate.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.downloadYAMLTemplate();
+        });
+    }
+
+    toggleViewMode() {
+        this.yamlMode = !this.yamlMode;
+
+        if (this.yamlMode) {
+            this.viewModeToggle.classList.add('yaml-mode');
+            this.yamlUploadView.classList.add('active');
+            this.manualCreationView.classList.add('hidden');
+        } else {
+            this.viewModeToggle.classList.remove('yaml-mode');
+            this.yamlUploadView.classList.remove('active');
+            this.manualCreationView.classList.remove('hidden');
+        }
+    }
+
+    handleYAMLFileSelect(e) {
+        const file = e.target.files[0];
+        if (file) {
+            this.handleYAMLFile(file);
+        }
+    }
+
+    handleYAMLFile(file) {
+        if (!file.name.endsWith('.yaml') && !file.name.endsWith('.yml')) {
+            messageManager.showError('Please upload a YAML file (.yaml or .yml)');
+            return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            messageManager.showError('File size exceeds 5MB limit');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const yamlText = e.target.result;
+                this.yamlData = this.parseYAML(yamlText);
+
+                document.getElementById('yaml-filename').textContent = file.name;
+                document.getElementById('yaml-filesize').textContent = this.formatFileSize(file.size);
+                this.yamlFileInfo.classList.add('visible');
+                this.yamlClearBtn.style.display = 'block';
+                this.yamlImportBtn.style.display = 'block';
+
+                messageManager.showSuccess('YAML file loaded successfully');
+            } catch (error) {
+                console.error('YAML parse error:', error);
+                messageManager.showError('Failed to parse YAML file: ' + error.message);
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    findCommentIndex(line) {
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === "'" && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+            } else if (char === '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+            }
+
+            if (char === '#' && !inSingleQuote && !inDoubleQuote) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    isQuoteClosed(text, quoteChar) {
+        let escaped = false;
+        let quoteCount = 0;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            if (char === quoteChar) {
+                if (quoteChar === '"' && escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (quoteChar === "'") {
+                    if (i + 1 < text.length && text[i + 1] === "'") {
+                        i++;
+                        continue;
+                    }
+                }
+
+                quoteCount++;
+            }
+
+            if (quoteChar === '"' && char === '\\' && !escaped) {
+                escaped = true;
+            } else {
+                escaped = false;
+            }
+        }
+
+        return quoteCount >= 2 && quoteCount % 2 === 0;
+    }
+
+    findClosingQuote(text, quoteChar) {
+        let escaped = false;
+        let quoteCount = 0;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            if (char === quoteChar) {
+                if (quoteChar === '"' && escaped) {
+                    escaped = false;
+                    continue;
+                }
+
+                if (quoteChar === "'") {
+                    if (i + 1 < text.length && text[i + 1] === "'") {
+                        i++; // Skip the escaped quote
+                        continue;
+                    }
+                }
+
+                quoteCount++;
+
+                if (quoteCount === 2) {
+                    return i;
+                }
+            }
+
+            if (quoteChar === '"' && char === '\\' && !escaped) {
+                escaped = true;
+            } else {
+                escaped = false;
+            }
+        }
+
+        return -1;
+    }
+
+    parseQuotedMultiline(text, quoteChar) {
+        text = text.slice(1, -1);
+
+        if (quoteChar === '"') {
+            let result = '';
+            let i = 0;
+
+            while (i < text.length) {
+                if (text[i] === '\\' && i + 1 < text.length) {
+                    const nextChar = text[i + 1];
+
+                    switch (nextChar) {
+                        case 'n':
+                            result += '\x00NEWLINE\x00';
+                            i += 2;
+                            break;
+                        case 't':
+                            result += '\t';
+                            i += 2;
+                            break;
+                        case 'r':
+                            result += '\r';
+                            i += 2;
+                            break;
+                        case '\\':
+                            result += '\\';
+                            i += 2;
+                            break;
+                        case '"':
+                            result += '"';
+                            i += 2;
+                            break;
+                        case '\n':
+                            i += 2;
+                            while (i < text.length && (text[i] === ' ' || text[i] === '\t')) {
+                                i++;
+                            }
+                            break;
+                        default:
+                            result += '\\' + nextChar;
+                            i += 2;
+                            break;
+                    }
+                } else {
+                    result += text[i];
+                    i++;
+                }
+            }
+
+            text = result;
+
+            const lines = text.split('\n');
+            const resultLines = [];
+            let currentParagraph = [];
+
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine === '') {
+                    if (currentParagraph.length > 0) {
+                        resultLines.push(currentParagraph.join(' '));
+                        currentParagraph = [];
+                    }
+                    if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== '') {
+                        resultLines.push('');
+                    }
+                } else {
+                    currentParagraph.push(trimmedLine);
+                }
+            }
+
+            if (currentParagraph.length > 0) {
+                resultLines.push(currentParagraph.join(' '));
+            }
+
+            let finalResult = resultLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+            finalResult = finalResult.replace(/\x00NEWLINE\x00/g, '\n');
+
+            return finalResult;
+
+        } else if (quoteChar === "'") {
+            text = text.replace(/''/g, "'");
+
+            const lines = text.split('\n');
+            const result = [];
+            let currentParagraph = [];
+
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (trimmedLine === '') {
+                    if (currentParagraph.length > 0) {
+                        result.push(currentParagraph.join(' '));
+                        currentParagraph = [];
+                    }
+                    if (result.length > 0 && result[result.length - 1] !== '') {
+                        result.push('');
+                    }
+                } else {
+                    currentParagraph.push(trimmedLine);
+                }
+            }
+
+            if (currentParagraph.length > 0) {
+                result.push(currentParagraph.join(' '));
+            }
+
+            return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+        }
+
+        return text;
+    }
+
+    parseYAML(yamlText) {
+        try {
+            const lines = yamlText.split('\n');
+            const result = {};
+            const stack = [{ obj: result, indent: -1, key: '' }];
+            let multilineMode = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+
+                const indent = line.search(/\S/);
+
+                if (multilineMode) {
+                    if (multilineMode.type === '"' || multilineMode.type === "'") {
+                        const quoteChar = multilineMode.type;
+                        multilineMode.lines.push(line);
+
+                        const fullText = multilineMode.lines.join('\n');
+                        const closingQuoteIndex = this.findClosingQuote(fullText, quoteChar);
+
+                        if (closingQuoteIndex !== -1) {
+                            const parent = stack[stack.length - 1].obj;
+                            const key = multilineMode.key;
+                            const quotedContent = fullText.substring(0, closingQuoteIndex + 1);
+                            parent[key] = this.parseQuotedMultiline(quotedContent, quoteChar);
+                            multilineMode = null;
+                        }
+                        continue;
+                    } else {
+                        if (line.trim() === '' || (indent > multilineMode.startIndent && line.trim() !== '')) {
+                            multilineMode.lines.push(line);
+                            continue;
+                        } else {
+                            const parent = stack[stack.length - 1].obj;
+                            const key = multilineMode.key;
+
+                            if (multilineMode.type === '|') {
+                                const contentLines = multilineMode.lines
+                                    .map(l => l.substring(multilineMode.startIndent + 2)) // Remove base indentation
+                                    .join('\n')
+                                    .trimEnd();
+                                parent[key] = contentLines;
+                            } else if (multilineMode.type === '>') {
+                                const contentLines = multilineMode.lines
+                                    .map(l => l.substring(multilineMode.startIndent + 2).trim())
+                                    .filter(l => l !== '')
+                                    .join(' ');
+                                parent[key] = contentLines;
+                            }
+                            multilineMode = null;
+                        }
+                    }
+                }
+
+                const commentIndex = this.findCommentIndex(line);
+                if (commentIndex !== -1) {
+                    line = line.substring(0, commentIndex);
+                }
+
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) continue;
+
+                while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+                    stack.pop();
+                }
+
+                const parent = stack[stack.length - 1].obj;
+
+                if (trimmed.startsWith('- ')) {
+                    const content = trimmed.substring(2).trim();
+
+                    if (!Array.isArray(parent)) {
+                        throw new Error('List item found but parent is not an array');
+                    }
+
+                    if (content.includes(':')) {
+                        const obj = {};
+                        parent.push(obj);
+                        const colonIndex = content.indexOf(':');
+                        const key = content.substring(0, colonIndex).trim();
+                        const value = content.substring(colonIndex + 1).trim();
+
+                        if (value === '' || value === '{}') {
+                            obj[key] = {};
+                            stack.push({ obj: obj[key], indent: indent, key: key });
+                        } else {
+                            obj[key] = this.parseValue(value);
+                        }
+                    } else {
+                        parent.push(this.parseValue(content));
+                    }
+                } else if (trimmed.includes(':')) {
+                    const colonIndex = trimmed.indexOf(':');
+                    const key = trimmed.substring(0, colonIndex).trim();
+                    let value = trimmed.substring(colonIndex + 1).trim();
+
+                    if (value === '|' || value === '>') {
+                        multilineMode = {
+                            type: value,
+                            startIndent: indent,
+                            key: key,
+                            lines: []
+                        };
+                        continue;
+                    }
+
+                    if ((value.startsWith('"') && !this.isQuoteClosed(value, '"')) ||
+                        (value.startsWith("'") && !this.isQuoteClosed(value, "'"))) {
+                        const quoteChar = value[0];
+                        multilineMode = {
+                            type: quoteChar,
+                            startIndent: indent,
+                            key: key,
+                            lines: [value]
+                        };
+                        continue;
+                    }
+
+                    if (value.startsWith('[') && value.endsWith(']')) {
+                        const arrayContent = value.slice(1, -1).trim();
+                        if (arrayContent === '') {
+                            parent[key] = [];
+                        } else {
+                            parent[key] = arrayContent
+                                .split(',')
+                                .map(item => this.parseValue(item.trim()))
+                                .filter(item => item !== '');
+                        }
+                    } else if (value === '' || value === '{}') {
+                        let isNextLineList = false;
+                        let isNextLineNested = false;
+
+                        if (i + 1 < lines.length) {
+                            let nextLine = lines[i + 1];
+
+                            const nextCommentIndex = this.findCommentIndex(nextLine);
+                            if (nextCommentIndex !== -1) {
+                                nextLine = nextLine.substring(0, nextCommentIndex);
+                            }
+
+                            const nextTrimmed = nextLine.trim();
+                            const nextIndent = nextLine.search(/\S/);
+
+                            if (nextTrimmed && nextIndent > indent) {
+                                isNextLineNested = true;
+                                if (nextTrimmed.startsWith('-')) {
+                                    isNextLineList = true;
+                                }
+                            }
+                        }
+
+                        if (!isNextLineNested) {
+                            parent[key] = '';
+                        } else if (isNextLineList) {
+                            parent[key] = [];
+                            stack.push({ obj: parent[key], indent: indent, key: key });
+                        } else {
+                            parent[key] = {};
+                            stack.push({ obj: parent[key], indent: indent, key: key });
+                        }
+                    } else if (value === '[]') {
+                        parent[key] = [];
+                        stack.push({ obj: parent[key], indent: indent, key: key });
+                    } else {
+                        parent[key] = this.parseValue(value);
+                    }
+                }
+            }
+
+            if (multilineMode) {
+                const parent = stack[stack.length - 1].obj;
+                const key = multilineMode.key;
+
+                if (multilineMode.type === '"' || multilineMode.type === "'") {
+                    const quoteChar = multilineMode.type;
+                    const fullText = multilineMode.lines.join('\n');
+                    parent[key] = this.parseQuotedMultiline(fullText, quoteChar);
+                } else if (multilineMode.type === '|') {
+                    const contentLines = multilineMode.lines
+                        .map(l => l.substring(multilineMode.startIndent + 2))
+                        .join('\n')
+                        .trimEnd();
+                    parent[key] = contentLines;
+                } else if (multilineMode.type === '>') {
+                    const contentLines = multilineMode.lines
+                        .map(l => l.substring(multilineMode.startIndent + 2).trim())
+                        .filter(l => l !== '')
+                        .join(' ');
+                    parent[key] = contentLines;
+                }
+            }
+
+            return result.ctf || result;
+        } catch (error) {
+            console.error('YAML parsing error:', error);
+            throw new Error('Failed to parse YAML: ' + error.message);
+        }
+    }
+
+    parseValue(value) {
+        value = value.trim();
+
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+            return value.slice(1, -1);
+        }
+
+        if (value.startsWith('<') && value.endsWith('>')) {
+            return value.slice(1, -1);
+        }
+
+        if (value === 'true' || value === '<true|false>') return true;
+        if (value === 'false') return false;
+
+        if (value === 'null') return null;
+
+        if (!isNaN(value) && value !== '') return Number(value);
+
+        return value;
+    }
+
+    clearYAMLFile() {
+        this.yamlData = null;
+        this.yamlFileInput.value = '';
+        this.yamlFileInfo.classList.remove('visible');
+        this.yamlClearBtn.style.display = 'none';
+        this.yamlImportBtn.style.display = 'none';
+    }
+
+    async importYAMLConfiguration() {
+        if (!this.yamlData) {
+            messageManager.showError('No YAML file loaded');
+            return;
+        }
+
+        try {
+            this.vms = [];
+            this.subnets = [];
+            this.flags = [];
+            this.hints = [];
+            this.vmIconsContainer.innerHTML = '';
+            this.subnetRegionsContainer.innerHTML = '';
+
+            if (this.yamlData.name) this.ctfForm.name.value = this.yamlData.name;
+            if (this.yamlData.description) this.ctfForm.description.value = this.yamlData.description;
+            if (this.yamlData.category) this.ctfForm.category.value = this.yamlData.category;
+            if (this.yamlData.difficulty) this.ctfForm.difficulty.value = this.yamlData.difficulty;
+            if (this.yamlData.hint) this.ctfForm.hint.value = this.yamlData.hint;
+            if (this.yamlData.solution) this.ctfForm.solution.value = this.yamlData.solution;
+            if (this.yamlData.is_active !== undefined) this.ctfForm.isActive.checked = this.yamlData.is_active;
+
+            if (this.yamlData.vms) {
+                const vmsData = Array.isArray(this.yamlData.vms)
+                    ? this.yamlData.vms
+                    : Object.entries(this.yamlData.vms).map(([key, value]) => ({
+                        name: key,
+                        ...value
+                    }));
+
+                for (const vmData of vmsData) {
+                    const ova = this.availableOVAs.find(o => o.name === vmData.ova_name);
+                    if (!ova) {
+                        messageManager.showError(`OVA template '${vmData.ova_name}' not found, skipping VM '${vmData.name}'`);
+                        continue;
+                    }
+
+                    const vm = {
+                        name: vmData.name,
+                        ova_id: ova.id,
+                        ova_name: ova.name,
+                        cores: vmData.cores,
+                        ram: vmData.ram_gb,
+                        ip: vmData.domain_name,
+                        id: this.generateId()
+                    };
+                    this.vms.push(vm);
+                    this.createVMIcon(vm);
+                }
+            }
+
+            if (this.yamlData.subnets) {
+                const subnetsData = Array.isArray(this.yamlData.subnets)
+                    ? this.yamlData.subnets
+                    : Object.entries(this.yamlData.subnets).map(([key, value]) => ({
+                        name: key,
+                        ...value
+                    }));
+
+                for (const subnetData of subnetsData) {
+                    const attachedVMIds = [];
+                    if (subnetData.attached_vms && Array.isArray(subnetData.attached_vms)) {
+                        for (const vmName of subnetData.attached_vms) {
+                            const vm = this.vms.find(v => v.name === vmName);
+                            if (vm) attachedVMIds.push(vm.id);
+                        }
+                    }
+
+                    const subnet = {
+                        name: subnetData.name,
+                        dmz: subnetData.dmz || false,
+                        accessible: subnetData.accessible || false,
+                        attachedVMs: attachedVMIds,
+                        id: this.generateId()
+                    };
+                    this.subnets.push(subnet);
+                    this.createSubnetRegion(subnet);
+                }
+            }
+
+            if (this.yamlData.flags) {
+                const flagsData = Array.isArray(this.yamlData.flags)
+                    ? this.yamlData.flags
+                    : Object.values(this.yamlData.flags);
+
+                for (const flagData of flagsData) {
+                    let vmId = null;
+                    if (flagData.user_specific && flagData.vm_name) {
+                        const vm = this.vms.find(v => v.name === flagData.vm_name);
+                        if (vm) vmId = vm.id;
+                    }
+
+                    const flag = {
+                        flag: flagData.flag,
+                        description: flagData.description || '',
+                        points: flagData.points,
+                        order_index: flagData.order_index || 0,
+                        user_specific: flagData.user_specific || false,
+                        vm_id: vmId,
+                        id: this.generateId()
+                    };
+                    this.flags.push(flag);
+                }
+                this.updateFlagsList();
+            }
+
+            if (this.yamlData.hints) {
+                const hintsData = Array.isArray(this.yamlData.hints)
+                    ? this.yamlData.hints
+                    : Object.values(this.yamlData.hints);
+
+                for (const hintData of hintsData) {
+                    const hint = {
+                        hint_text: hintData.hint_text,
+                        unlock_points: hintData.unlock_points || 0,
+                        order_index: hintData.order_index || 0,
+                        id: this.generateId()
+                    };
+                    this.hints.push(hint);
+                }
+                this.updateHintsList();
+            }
+
+            this.toggleViewMode();
+            this.updateLayout();
+
+            messageManager.showSuccess('YAML configuration imported successfully!');
+        } catch (error) {
+            console.error('Import error:', error);
+            messageManager.showError('Failed to import YAML configuration: ' + error.message);
+        }
+    }
+
+    downloadYAMLTemplate() {
+        const template = `# CTF Challenge YAML Template
+ctf:
+  name: <CTF_NAME>
+  description: <CTF_DESCRIPTION>
+  hint: <CTF_OVERVIEW_HINT> # optional
+  solution: <CTF_SOLUTION>  # optional
+  category: <CATEGORY>      # ['web', 'crypto', 'reverse', 'forensics', 'pwn', 'misc']
+  difficulty: <DIFFICULTY>  # ['easy', 'medium', 'hard']
+  is_active: <true|false>
+
+  vms:
+    <vm_name_1>:
+      ova_name: <OVA_NAME_1>
+      cores: <NUM_CORES>
+      ram_gb: <RAM_GB>
+      domain_name: <DOMAIN_NAME_1>
+    # ...
+
+  subnets:
+    <subnet_name_1>:
+      dmz: <true|false>
+      accessible: <true|false>
+      attached_vms: [
+        <vm_name_1>,
+        <vm_name_2>,
+        ...
+      ] 
+      # or use 
+      # attached_vms:
+      #   - <vm_name_1>
+      #   - <vm_name_2>
+    # ...
+
+  flags:
+    <index>:
+      flag: <FLAG_VALUE>
+      description: <FLAG_DESCRIPTION>
+      points: <POINTS>
+      order_index: <INDEX>
+      user_specific: <true|false> # optional
+      vm_name: <vm_name_1> # only for user_specific
+    # ...
+
+  hints: #optional
+    <index>:
+      hint_text: <HINT_VALUE>
+      unlock_points: <POINTS_TO_UNLOCK>
+      order_index: <INDEX>
+    # ...
+    `;
+
+        const blob = new Blob([template], { type: 'text/yaml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ctf-template.yaml';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        messageManager.showSuccess('Template downloaded!');
+    }
+
+    formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
 }
 
 

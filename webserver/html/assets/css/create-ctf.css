@@ -809,3 +809,228 @@ input:checked + .option-slider:before {
 .flag-vm-dropdown-container {
     margin-bottom: 20px;
 }
+
+/* ===== VIEW MODE TOGGLE ===== */
+.view-mode-toggle {
+    background: var(--color-feature-bg);
+    padding: 8px 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    width: fit-content;
+    margin-left: auto;
+}
+
+.toggle-switch {
+    position: relative;
+    width: 60px;
+    height: 30px;
+    background: var(--color-background);
+    border-radius: 15px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+[data-theme="light"] .toggle-switch {
+    background: rgba(var(--color-text-rgb), 0.2);
+}
+
+.toggle-switch.yaml-mode {
+    background: var(--color-primary);
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch.yaml-mode .toggle-slider {
+    transform: translateX(30px);
+}
+
+.toggle-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-text);
+    user-select: none;
+    white-space: nowrap;
+}
+
+.toggle-label i {
+    margin-right: 5px;
+    color: var(--color-primary);
+}
+
+/* ===== YAML UPLOAD VIEW ===== */
+.yaml-upload-view {
+    display: none;
+    padding: 40px 20px;
+    margin: 0 auto;
+}
+
+.yaml-upload-view.active {
+    display: block;
+}
+
+.yaml-upload-container {
+    background: var(--color-feature-bg);
+    padding: 40px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.yaml-upload-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.yaml-upload-header h2 {
+    color: var(--color-primary);
+    margin-bottom: 10px;
+}
+
+.yaml-upload-header p {
+    color: rgba(var(--color-text-rgb), 0.7);
+    font-size: 0.95rem;
+}
+
+.yaml-drop-zone {
+    border: 3px dashed rgba(var(--color-primary-rgb), 0.3);
+    border-radius: 10px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.yaml-drop-zone:hover,
+.yaml-drop-zone.drag-over {
+    border-color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.yaml-drop-zone i {
+    font-size: 4rem;
+    color: var(--color-primary);
+    margin-bottom: 20px;
+    display: block;
+}
+
+.yaml-drop-zone p {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+}
+
+.yaml-drop-zone small {
+    color: rgba(var(--color-text-rgb), 0.6);
+    font-size: 0.85rem;
+}
+
+.yaml-file-info {
+    display: none;
+    margin-top: 20px;
+    padding: 20px;
+    background: rgba(var(--color-primary-rgb), 0.1);
+    border-radius: 8px;
+    border-left: 4px solid var(--color-primary);
+}
+
+.yaml-file-info.visible {
+    display: block;
+}
+
+.yaml-file-info h4 {
+    margin: 0 0 10px 0;
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.yaml-file-info p {
+    margin: 5px 0;
+    font-size: 0.9rem;
+}
+
+.yaml-actions {
+    display: flex;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.yaml-actions button {
+    flex: 1;
+}
+
+.yaml-example {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+}
+
+.yaml-example h3 {
+    margin: 0 0 15px 0;
+    font-size: 1rem;
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.yaml-example pre {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 15px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: #e0e0e0;
+}
+
+[data-theme="light"] .yaml-example pre {
+    background: rgba(0, 0, 0, 0.05);
+    color: #333;
+}
+
+.yaml-download-template {
+    margin-top: 15px;
+    text-align: center;
+}
+
+.yaml-download-template a {
+    color: var(--color-primary);
+    text-decoration: none;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: rgba(var(--color-primary-rgb), 0.1);
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+.yaml-download-template a:hover {
+    background: rgba(var(--color-primary-rgb), 0.2);
+    transform: translateY(-2px);
+}
+
+.manual-creation-view {
+    display: block;
+}
+
+.manual-creation-view.hidden {
+    display: none;
+}

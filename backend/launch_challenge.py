@@ -828,14 +828,24 @@ def stop_and_delete_machines(challenge):
 
     for machine in challenge.machines.values():
         try:
-            stop_vm_api_call(machine.id)
-        except Exception:
-            pass
+            out = subprocess.run(["qm", "stop", str(machine.id), "--skiplock"], check=True, capture_output=True)
+        except Exception as e:
+            print(f"[Warning] Failed to stop VM {machine.id}: {e}", flush=True)
+            try:
+                print(out.stdout.decode(), flush=True)
+                print(out.stderr.decode(), flush=True)
+            except Exception:
+                pass
 
         try:
-            delete_vm_api_call(machine)
-        except Exception:
-            pass
+            out = subprocess.run(["qm", "destroy", str(machine.id), "--skiplock"], check=True, capture_output=True)
+        except Exception as e:
+            print(f"[Warning] Failed to destroy VM {machine.id}: {e}", flush=True)
+            try:
+                print(out.stdout.decode(), flush=True)
+                print(out.stderr.decode(), flush=True)
+            except Exception:
+                pass
 
 
 def delete_network_devices(challenge):

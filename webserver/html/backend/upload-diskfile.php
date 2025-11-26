@@ -755,7 +755,7 @@ class OvaUploadHandler
 
     private function sanitizeFilename(string $filename): string
     {
-        return preg_replace('/[^a-zA-Z0-9\-_.]/', '', $filename);
+        return preg_replace('/[^a-zA-Z0-9\-_. ]/', '', $filename);
     }
 
     private function handleError(Exception $e): void

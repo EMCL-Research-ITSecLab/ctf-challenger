@@ -405,7 +405,7 @@ try {
 } catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/manage-announcements");
     $logger->logError("Error in manage-announcements endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
@@ -419,7 +419,7 @@ try {
     echo json_encode($response);
 } catch (Exception $e) {
     http_response_code(500);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/manage-announcements");
     $logger->logError("Unexpected error in manage-announcements endpoint: " . $e->getMessage());
     echo json_encode([
         'success' => false,

@@ -790,7 +790,7 @@ try {
 } catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     http_response_code($errorCode);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/upload-diskfile");
     $logger->logError("Error in upload-diskfile endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
@@ -805,7 +805,7 @@ try {
 } catch (Exception $e) {
     // most likely not reachable, gonna leave it here for safety
     http_response_code(500);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/upload-diskfile");
     $logger->logError("Unexpected error in upload-diskfile endpoint: " . $e->getMessage());
     echo json_encode([
         'success' => false,

@@ -33,6 +33,8 @@ ctf:
       description: <FLAG_DESCRIPTION>
       points: <POINTS>
       order_index: <INDEX>
+      user_specific: <true|false>
+      vm_name: <VM_NAME_IF_USER_SPECIFIC>
     # ...
 
   hints:

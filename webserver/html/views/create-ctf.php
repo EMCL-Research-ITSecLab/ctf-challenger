@@ -236,24 +236,16 @@ if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess
                         <label for="vm-cores">Cores</label>
                         <input type="number" id="vm-cores" name="vm-cores" min="1" required>
                         <div class="number-controls">
-                            <button type="button" class="number-btn"
-                                    onclick="this.parentElement.previousElementSibling.stepUp()">▲
-                            </button>
-                            <button type="button" class="number-btn"
-                                    onclick="this.parentElement.previousElementSibling.stepDown()">▼
-                            </button>
+                            <button type="button" class="number-btn">▲</button>
+                            <button type="button" class="number-btn">▼</button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label for="vm-ram">RAM (GB)</label>
                         <input type="number" id="vm-ram" name="vm-ram" min="1" required>
                         <div class="number-controls">
-                            <button type="button" class="number-btn"
-                                    onclick="this.parentElement.previousElementSibling.stepUp()">▲
-                            </button>
-                            <button type="button" class="number-btn"
-                                    onclick="this.parentElement.previousElementSibling.stepDown()">▼
-                            </button>
+                            <button type="button" class="number-btn">▲</button>
+                            <button type="button" class="number-btn">▼</button>
                         </div>
                     </div>
                     <div class="form-group">

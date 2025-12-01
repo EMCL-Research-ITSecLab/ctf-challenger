@@ -342,12 +342,20 @@ class VMProvisioner:
         if "USER" in service:
             service_content.append(f"User={service['USER']}")
 
+        service_content.extend([
+            "[Install]",
+            "WantedBy=multi-user.target\n"
+        ])
+
         remote_service_file = f"/etc/systemd/system/{service['name']}.service"
         tmp_file = f"/tmp/{service['name']}.service"
         with open(tmp_file, "w") as f:
             f.write("\n".join(service_content))
 
         self.vm.upload(tmp_file, remote_service_file)
+        self.vm.execute_remote_command(f"chown root:root {remote_service_file}")
+        self.vm.execute_remote_command(f"chmod 755 {remote_service_file}")
+
         self.vm.execute_remote_command(f"systemctl daemon-reload")
         self.vm.execute_remote_command(f"systemctl enable {service['name']}")
 
@@ -375,6 +383,7 @@ def main():
     args = parser.parse_args()
 
     build_file_path = args.build_file_path
+    build_file_path = os.path.abspath(build_file_path)
     build_script_base_dir = os.path.dirname(os.path.abspath(build_file_path))
 
     output_ova_path = args.output_ova_path

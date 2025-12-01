@@ -270,7 +270,7 @@ try {
 } catch (CustomException $e) {
     $errorCode = $e->getCode() ?: 500;
     $errorMessage = $e->getMessage();
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/explore");
 
     if ($errorCode === 401) {
         $this->session->unset();
@@ -293,7 +293,7 @@ try {
     ]);
 } catch (Exception $e) {
     http_response_code(500);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/explore");
     $logger->logError("Unexpected error in explore endpoint: " . $e->getMessage() . "\n" . $e->getTraceAsString());
     echo json_encode([
         'success' => false,

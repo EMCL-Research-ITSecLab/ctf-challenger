@@ -1177,7 +1177,7 @@ try {
 } catch (CustomException $e) {
     $errorCode = (int)($e->getCode() ?: 500);
     http_response_code($errorCode);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/challenge");
     $logger->logError("Error in challenge endpoint: " . $e->getMessage() . " (Code: $errorCode)");
     $response = [
         'success' => false,
@@ -1191,7 +1191,7 @@ try {
     echo json_encode($response);
 } catch (Exception $e) {
     http_response_code(500);
-    $logger = new Logger(route: $this->route);
+    $logger = new Logger("/challenge");
     $logger->logError("Unexpected error in challenge endpoint: " . $e->getMessage());
     echo json_encode([
         'success' => false,

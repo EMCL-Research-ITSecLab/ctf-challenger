@@ -96,6 +96,8 @@ class CTFCreator {
         [this.vmForm, this.subnetForm, this.flagForm, this.hintForm].forEach(form => {
             form.setAttribute('novalidate', '');
         });
+
+        this.numberBtns = document.querySelectorAll('.number-btn');
     }
 
     initEventListeners() {
@@ -122,6 +124,19 @@ class CTFCreator {
                 this.toggleFlagVMDropdown();
             });
         }
+
+        this.numberBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                const input = this.parentElement.previousElementSibling;
+                const buttonText = this.textContent.trim();
+
+                if (buttonText === '▲') {
+                    input.stepUp();
+                } else if (buttonText === '▼') {
+                    input.stepDown();
+                }
+            });
+        });
     }
 
 
@@ -1680,6 +1695,99 @@ class CTFCreator {
         reader.readAsText(file);
     }
 
+    smartSplit(text, delimiter = ',') {
+        const result = [];
+        let current = '';
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+        let bracketDepth = 0;
+        let braceDepth = 0;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+
+            if (char === "'" && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                current += char;
+            } else if (char === '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                current += char;
+            } else if (!inSingleQuote && !inDoubleQuote) {
+                if (char === '[') bracketDepth++;
+                else if (char === ']') bracketDepth--;
+                else if (char === '{') braceDepth++;
+                else if (char === '}') braceDepth--;
+
+                if (char === delimiter && bracketDepth === 0 && braceDepth === 0) {
+                    result.push(current.trim());
+                    current = '';
+                    continue;
+                }
+
+                current += char;
+            } else {
+                current += char;
+            }
+        }
+
+        if (current.trim()) {
+            result.push(current.trim());
+        }
+
+        return result.filter(item => item !== '');
+    }
+
+    parseInlineObject(text) {
+        text = text.trim();
+
+        if (!text.startsWith('{') || !text.endsWith('}')) {
+            return null;
+        }
+
+        const content = text.slice(1, -1).trim();
+        if (!content) return {};
+
+        const obj = {};
+        const pairs = this.smartSplit(content, ',');
+
+        for (const pair of pairs) {
+            const trimmedPair = pair.trim();
+
+            let colonIndex = -1;
+            let inQuote = false;
+            let quoteChar = null;
+
+            for (let i = 0; i < trimmedPair.length; i++) {
+                const char = trimmedPair[i];
+                if ((char === '"' || char === "'") && (i === 0 || trimmedPair[i-1] !== '\\')) {
+                    if (!inQuote) {
+                        inQuote = true;
+                        quoteChar = char;
+                    } else if (char === quoteChar) {
+                        inQuote = false;
+                        quoteChar = null;
+                    }
+                } else if (char === ':' && !inQuote) {
+                    colonIndex = i;
+                    break;
+                }
+            }
+
+            if (colonIndex === -1) {
+                if (trimmedPair) {
+                    obj[trimmedPair] = '';
+                }
+                continue;
+            }
+
+            const key = trimmedPair.substring(0, colonIndex).trim();
+            const value = trimmedPair.substring(colonIndex + 1).trim();
+            obj[key] = this.parseValue(value);
+        }
+
+        return obj;
+    }
+
     findCommentIndex(line) {
         let inSingleQuote = false;
         let inDoubleQuote = false;
@@ -1749,7 +1857,7 @@ class CTFCreator {
 
                 if (quoteChar === "'") {
                     if (i + 1 < text.length && text[i + 1] === "'") {
-                        i++; // Skip the escaped quote
+                        i++;
                         continue;
                     }
                 }
@@ -1784,7 +1892,7 @@ class CTFCreator {
 
                     switch (nextChar) {
                         case 'n':
-                            result += '\x00NEWLINE\x00';
+                            result += '\n';
                             i += 2;
                             break;
                         case 't':
@@ -1820,79 +1928,81 @@ class CTFCreator {
                 }
             }
 
-            text = result;
-
-            const lines = text.split('\n');
-            const resultLines = [];
-            let currentParagraph = [];
-
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (trimmedLine === '') {
-                    if (currentParagraph.length > 0) {
-                        resultLines.push(currentParagraph.join(' '));
-                        currentParagraph = [];
-                    }
-                    if (resultLines.length > 0 && resultLines[resultLines.length - 1] !== '') {
-                        resultLines.push('');
-                    }
-                } else {
-                    currentParagraph.push(trimmedLine);
-                }
-            }
-
-            if (currentParagraph.length > 0) {
-                resultLines.push(currentParagraph.join(' '));
-            }
-
-            let finalResult = resultLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-
-            finalResult = finalResult.replace(/\x00NEWLINE\x00/g, '\n');
-
-            return finalResult;
+            return result;
 
         } else if (quoteChar === "'") {
             text = text.replace(/''/g, "'");
-
-            const lines = text.split('\n');
-            const result = [];
-            let currentParagraph = [];
-
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (trimmedLine === '') {
-                    if (currentParagraph.length > 0) {
-                        result.push(currentParagraph.join(' '));
-                        currentParagraph = [];
-                    }
-                    if (result.length > 0 && result[result.length - 1] !== '') {
-                        result.push('');
-                    }
-                } else {
-                    currentParagraph.push(trimmedLine);
-                }
-            }
-
-            if (currentParagraph.length > 0) {
-                result.push(currentParagraph.join(' '));
-            }
-
-            return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+            return text.replace(/\n[ \t]*/g, '\n');
         }
 
         return text;
+    }
+
+    parseValue(value) {
+        value = value.trim();
+
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+            const quoteChar = value[0];
+            value = value.slice(1, -1);
+
+            if (quoteChar === '"') {
+                value = value.replace(/\\n/g, '\n')
+                             .replace(/\\t/g, '\t')
+                             .replace(/\\r/g, '\r')
+                             .replace(/\\\\/g, '\\')
+                             .replace(/\\"/g, '"');
+            } else {
+                value = value.replace(/''/g, "'");
+            }
+
+            return value;
+        }
+
+        if (value.startsWith('<') && value.endsWith('>')) {
+            return value.slice(1, -1);
+        }
+
+        if (value === '{}') {
+            return {};
+        }
+
+        if (value.startsWith('{') && value.endsWith('}')) {
+            const obj = this.parseInlineObject(value);
+            return obj !== null ? obj : value;
+        }
+
+        if (value.startsWith('[') && value.endsWith(']')) {
+            const content = value.slice(1, -1).trim();
+            if (!content) return [];
+
+            const items = this.smartSplit(content, ',');
+
+            return items.map(item => {
+                const trimmedItem = item.trim();
+                const result = this.parseValue(trimmedItem);
+                return result;
+            });
+        }
+
+        if (value === 'true' || value === '<true|false>') return true;
+        if (value === 'false') return false;
+        if (value === 'null') return null;
+        if (!isNaN(value) && value !== '') return Number(value);
+
+        return value;
     }
 
     parseYAML(yamlText) {
         try {
             const lines = yamlText.split('\n');
             const result = {};
-            const stack = [{ obj: result, indent: -1, key: '' }];
+            const stack = [{ obj: result, indent: -1, key: '', isArray: false, isArrayItem: false }];
             let multilineMode = null;
+            let arrayMode = null;
 
             for (let i = 0; i < lines.length; i++) {
                 let line = lines[i];
-
                 const indent = line.search(/\S/);
 
                 if (multilineMode) {
@@ -1904,10 +2014,15 @@ class CTFCreator {
                         const closingQuoteIndex = this.findClosingQuote(fullText, quoteChar);
 
                         if (closingQuoteIndex !== -1) {
-                            const parent = stack[stack.length - 1].obj;
-                            const key = multilineMode.key;
                             const quotedContent = fullText.substring(0, closingQuoteIndex + 1);
-                            parent[key] = this.parseQuotedMultiline(quotedContent, quoteChar);
+                            const parsedValue = this.parseQuotedMultiline(quotedContent, quoteChar);
+
+                            if (multilineMode.inArray) {
+                                multilineMode.array.push(parsedValue);
+                            } else {
+                                const parent = stack[stack.length - 1].obj;
+                                parent[multilineMode.key] = parsedValue;
+                            }
                             multilineMode = null;
                         }
                         continue;
@@ -1916,30 +2031,206 @@ class CTFCreator {
                             multilineMode.lines.push(line);
                             continue;
                         } else {
-                            const parent = stack[stack.length - 1].obj;
-                            const key = multilineMode.key;
+                            let contentLines;
+                            if (multilineMode.type === '|' || multilineMode.type === '|-') {
+                                contentLines = multilineMode.lines
+                                    .map(l => l.substring(multilineMode.startIndent + 2))
+                                    .join('\n');
 
-                            if (multilineMode.type === '|') {
-                                const contentLines = multilineMode.lines
-                                    .map(l => l.substring(multilineMode.startIndent + 2)) // Remove base indentation
-                                    .join('\n')
-                                    .trimEnd();
-                                parent[key] = contentLines;
-                            } else if (multilineMode.type === '>') {
-                                const contentLines = multilineMode.lines
+                                if (multilineMode.type === '|') {
+                                    contentLines = contentLines.trimEnd() + '\n';
+                                } else {
+                                    contentLines = contentLines.trimEnd();
+                                }
+                            } else if (multilineMode.type === '>' || multilineMode.type === '>-') {
+                                contentLines = multilineMode.lines
                                     .map(l => l.substring(multilineMode.startIndent + 2).trim())
                                     .filter(l => l !== '')
                                     .join(' ');
-                                parent[key] = contentLines;
+
+                                if (multilineMode.type === '>') {
+                                    contentLines += '\n';
+                                }
+                            }
+
+                            if (multilineMode.inArray) {
+                                multilineMode.array.push(contentLines);
+                            } else {
+                                const parent = stack[stack.length - 1].obj;
+                                parent[multilineMode.key] = contentLines;
                             }
                             multilineMode = null;
                         }
                     }
                 }
 
+                if (arrayMode) {
+                    const trimmed = line.trim();
+
+                    if (trimmed === ']' || trimmed.startsWith(']')) {
+                        arrayMode = null;
+                        continue;
+                    }
+
+                    if (indent !== -1 && indent <= arrayMode.startIndent) {
+                        arrayMode = null;
+                    } else if (indent > arrayMode.startIndent || indent === -1) {
+                        const commentIndex = this.findCommentIndex(line);
+                        let processedLine = line;
+                        if (commentIndex !== -1) {
+                            processedLine = line.substring(0, commentIndex);
+                        }
+
+                        const processedTrimmed = processedLine.trim();
+
+                        if (processedTrimmed === '' || processedTrimmed === ']') {
+                            if (processedTrimmed === ']') {
+                                arrayMode = null;
+                            }
+                            continue;
+                        }
+
+                        if (processedTrimmed.startsWith('- ')) {
+                            let content = processedTrimmed.substring(2).trim();
+
+                            if (content === '|' || content === '|-' || content === '>' || content === '>-') {
+                                multilineMode = {
+                                    type: content,
+                                    startIndent: indent,
+                                    key: null,
+                                    lines: [],
+                                    inArray: true,
+                                    array: arrayMode.array
+                                };
+                                continue;
+                            }
+
+                            if ((content.startsWith('"') && !this.isQuoteClosed(content, '"')) ||
+                                (content.startsWith("'") && !this.isQuoteClosed(content, "'"))) {
+                                const quoteChar = content[0];
+                                multilineMode = {
+                                    type: quoteChar,
+                                    startIndent: indent,
+                                    key: null,
+                                    lines: [content],
+                                    inArray: true,
+                                    array: arrayMode.array
+                                };
+                                continue;
+                            }
+
+                            if (content.includes(':')) {
+                                const colonIndex = content.indexOf(':');
+                                const key = content.substring(0, colonIndex).trim();
+                                const value = content.substring(colonIndex + 1).trim();
+
+                                const obj = {};
+                                arrayMode.array.push(obj);
+
+                                if (value === '' || value === '{}') {
+                                    let hasNestedProps = false;
+                                    if (i + 1 < lines.length) {
+                                        const nextLine = lines[i + 1];
+                                        const nextIndent = nextLine.search(/\S/);
+                                        const nextTrimmed = nextLine.trim();
+                                        if (nextTrimmed && nextIndent > indent && !nextTrimmed.startsWith('-')) {
+                                            hasNestedProps = true;
+                                        }
+                                    }
+
+                                    if (hasNestedProps) {
+                                        obj[key] = {};
+                                    } else {
+                                        obj[key] = value === '{}' ? {} : '';
+                                    }
+                                    stack.push({ obj: obj, indent: indent, key: key, isArray: false, isArrayItem: true });
+                                } else {
+                                    obj[key] = this.parseValue(value);
+                                    stack.push({ obj: obj, indent: indent, key: key, isArray: false, isArrayItem: true });
+                                }
+                            } else {
+                                arrayMode.array.push(this.parseValue(content));
+                            }
+                        }
+                        else if (processedTrimmed.includes(':') && stack.length > 0) {
+                            let isPropertyOfArrayItem = false;
+                            for (let si = stack.length - 1; si >= 0; si--) {
+                                if (stack[si].isArrayItem && !Array.isArray(stack[si].obj)) {
+                                    isPropertyOfArrayItem = true;
+                                    break;
+                                }
+                            }
+
+                            if (isPropertyOfArrayItem) {
+                                const colonIndex = processedTrimmed.indexOf(':');
+                                const key = processedTrimmed.substring(0, colonIndex).trim();
+                                const value = processedTrimmed.substring(colonIndex + 1).trim();
+
+                                const currentObj = stack[stack.length - 1].obj;
+
+                                if (value === '' || value === '{}') {
+                                    let hasNestedProps = false;
+                                    if (i + 1 < lines.length) {
+                                        const nextLine = lines[i + 1];
+                                        const nextIndent = nextLine.search(/\S/);
+                                        const nextTrimmed = nextLine.trim();
+                                        if (nextTrimmed && nextIndent > indent && !nextTrimmed.startsWith('-')) {
+                                            hasNestedProps = true;
+                                        }
+                                    }
+
+                                    if (hasNestedProps) {
+                                        currentObj[key] = value === '{}' ? {} : (value.startsWith('[') ? [] : {});
+                                        stack.push({ obj: currentObj[key], indent: indent, key: key, isArray: Array.isArray(currentObj[key]) });
+                                    } else {
+                                        currentObj[key] = value === '{}' ? {} : parseValue(value);
+                                    }
+                                } else if (value === '[]') {
+                                    currentObj[key] = [];
+                                    stack.push({ obj: currentObj[key], indent: indent, key: key, isArray: true });
+                                } else if (value === '[') {
+                                    currentObj[key] = [];
+                                    arrayMode = {
+                                        startIndent: indent,
+                                        array: currentObj[key],
+                                        key: key
+                                    };
+                                } else {
+                                    currentObj[key] = this.parseValue(value);
+                                }
+                            } else {
+                                if (processedTrimmed.includes(',')) {
+                                    const items = this.smartSplit(processedTrimmed, ',');
+                                    items.forEach(item => {
+                                        const trimmedItem = item.trim();
+                                        if (trimmedItem) {
+                                            arrayMode.array.push(this.parseValue(trimmedItem));
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        else if (processedTrimmed.includes(',')) {
+                            const items = this.smartSplit(processedTrimmed, ',');
+                            items.forEach(item => {
+                                const trimmedItem = item.trim();
+                                if (trimmedItem) {
+                                    arrayMode.array.push(this.parseValue(trimmedItem));
+                                }
+                            });
+                        }
+                        else {
+                            if (processedTrimmed && !processedTrimmed.startsWith(']')) {
+                                arrayMode.array.push(this.parseValue(processedTrimmed));
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 const commentIndex = this.findCommentIndex(line);
                 if (commentIndex !== -1) {
-                    line = line.substring(0, commentIndex);
+                    line = line.substring(0, commentIndex).trimEnd();
                 }
 
                 const trimmed = line.trim();
@@ -1954,37 +2245,161 @@ class CTFCreator {
                 if (trimmed.startsWith('- ')) {
                     const content = trimmed.substring(2).trim();
 
-                    if (!Array.isArray(parent)) {
+                    let targetArray = null;
+
+                    if (Array.isArray(parent)) {
+                        targetArray = parent;
+                    } else if (stack[stack.length - 1].isArrayItem) {
+                        const currentObj = stack[stack.length - 1].obj;
+                        for (const key in currentObj) {
+                            if (Array.isArray(currentObj[key])) {
+                                targetArray = currentObj[key];
+                                break;
+                            }
+                        }
+
+                        if (!targetArray) {
+                            let shouldCreateArray = false;
+                            if (i + 1 < lines.length) {
+                                const nextLine = lines[i + 1];
+                                const nextIndent = nextLine.search(/\S/);
+                                if (nextIndent > indent) {
+                                    shouldCreateArray = true;
+                                }
+                            }
+
+                            if (shouldCreateArray) {
+                                for (const key in currentObj) {
+                                    if (currentObj[key] === '' || currentObj[key] === {}) {
+                                        currentObj[key] = [];
+                                        targetArray = currentObj[key];
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!targetArray) {
                         throw new Error('List item found but parent is not an array');
                     }
 
+                    if (content === '|' || content === '|-' || content === '>' || content === '>-') {
+                        multilineMode = {
+                            type: content,
+                            startIndent: indent,
+                            key: null,
+                            lines: [],
+                            inArray: true,
+                            array: targetArray
+                        };
+                        continue;
+                    }
+
+                    if ((content.startsWith('"') && !this.isQuoteClosed(content, '"')) ||
+                        (content.startsWith("'") && !this.isQuoteClosed(content, "'"))) {
+                        const quoteChar = content[0];
+                        multilineMode = {
+                            type: quoteChar,
+                            startIndent: indent,
+                            key: null,
+                            lines: [content],
+                            inArray: true,
+                            array: targetArray
+                        };
+                        continue;
+                    }
+
+                    if (content.startsWith('{') && content.endsWith('}')) {
+                        const obj = this.parseInlineObject(content);
+                        if (obj !== null) {
+                            targetArray.push(obj);
+                            continue;
+                        }
+                    }
+
                     if (content.includes(':')) {
-                        const obj = {};
-                        parent.push(obj);
                         const colonIndex = content.indexOf(':');
                         const key = content.substring(0, colonIndex).trim();
                         const value = content.substring(colonIndex + 1).trim();
 
+                        const obj = {};
+                        targetArray.push(obj);
+
                         if (value === '' || value === '{}') {
-                            obj[key] = {};
-                            stack.push({ obj: obj[key], indent: indent, key: key });
+                            let shouldCreateArray = false;
+
+                            if (i + 1 < lines.length) {
+                                const nextLine = lines[i + 1];
+                                const nextIndent = nextLine.search(/\S/);
+                                const nextTrimmed = nextLine.trim();
+
+                                if (nextIndent > indent && nextTrimmed.startsWith('-')) {
+                                    shouldCreateArray = true;
+                                }
+                            }
+
+                            if (shouldCreateArray) {
+                                obj[key] = [];
+                                stack.push({
+                                    obj: obj,
+                                    indent: indent,
+                                    key: key,
+                                    isArray: false,
+                                    isArrayItem: true
+                                });
+                            } else {
+                                let hasNestedProps = false;
+
+                                if (i + 1 < lines.length) {
+                                    const nextLine = lines[i + 1];
+                                    const nextIndent = nextLine.search(/\S/);
+                                    const nextTrimmed = nextLine.trim();
+
+                                    if (nextIndent > indent && !nextTrimmed.startsWith('-')) {
+                                        hasNestedProps = true;
+                                    }
+                                }
+
+                                if (hasNestedProps) {
+                                    obj[key] = {};
+                                    stack.push({
+                                        obj: obj,
+                                        indent: indent,
+                                        key: key,
+                                        isArray: false,
+                                        isArrayItem: true
+                                    });
+                                } else {
+                                    obj[key] = value === '{}' ? {} : '';
+                                }
+                            }
                         } else {
                             obj[key] = this.parseValue(value);
+                            stack.push({
+                                obj: obj,
+                                indent: indent,
+                                key: key,
+                                isArray: false,
+                                isArrayItem: true
+                            });
                         }
                     } else {
-                        parent.push(this.parseValue(content));
+                        targetArray.push(this.parseValue(content));
                     }
-                } else if (trimmed.includes(':')) {
+                }
+                else if (trimmed.includes(':')) {
                     const colonIndex = trimmed.indexOf(':');
                     const key = trimmed.substring(0, colonIndex).trim();
                     let value = trimmed.substring(colonIndex + 1).trim();
 
-                    if (value === '|' || value === '>') {
+                    if (value === '|' || value === '|-' || value === '>' || value === '>-') {
                         multilineMode = {
                             type: value,
                             startIndent: indent,
                             key: key,
-                            lines: []
+                            lines: [],
+                            inArray: false
                         };
                         continue;
                     }
@@ -1996,27 +2411,51 @@ class CTFCreator {
                             type: quoteChar,
                             startIndent: indent,
                             key: key,
-                            lines: [value]
+                            lines: [value],
+                            inArray: false
                         };
                         continue;
                     }
 
-                    if (value.startsWith('[') && value.endsWith(']')) {
-                        const arrayContent = value.slice(1, -1).trim();
-                        if (arrayContent === '') {
-                            parent[key] = [];
-                        } else {
-                            parent[key] = arrayContent
-                                .split(',')
-                                .map(item => this.parseValue(item.trim()))
-                                .filter(item => item !== '');
+                    if (value === '[') {
+                        parent[key] = [];
+                        arrayMode = {
+                            startIndent: indent,
+                            array: parent[key],
+                            key: key
+                        };
+                        continue;
+                    }
+                    else if (value.startsWith('[') && value.endsWith(']')) {
+                        parent[key] = this.parseValue(value);
+                    }
+                    else if (value.startsWith('[') && !value.endsWith(']')) {
+                        const arrayContent = value.slice(1).trim();
+                        parent[key] = [];
+
+                        if (arrayContent) {
+                            const items = this.smartSplit(arrayContent, ',');
+                            items.forEach(item => {
+                            const trimmedItem = item.trim();
+                            if (trimmedItem) {
+                                parent[key].push(this.parseValue(trimmedItem));
+                            }
+                        });
                         }
-                    } else if (value === '' || value === '{}') {
+
+                        arrayMode = {
+                            startIndent: indent,
+                            array: parent[key],
+                            key: key
+                        };
+                        continue;
+                    }
+                    else if (value === '') {
                         let isNextLineList = false;
                         let isNextLineNested = false;
 
-                        if (i + 1 < lines.length) {
-                            let nextLine = lines[i + 1];
+                        for (let j = i + 1; j < lines.length; j++) {
+                            let nextLine = lines[j];
 
                             const nextCommentIndex = this.findCommentIndex(nextLine);
                             if (nextCommentIndex !== -1) {
@@ -2026,52 +2465,103 @@ class CTFCreator {
                             const nextTrimmed = nextLine.trim();
                             const nextIndent = nextLine.search(/\S/);
 
-                            if (nextTrimmed && nextIndent > indent) {
+                            if (!nextTrimmed || nextTrimmed.startsWith('#')) {
+                                continue;
+                            }
+
+                            if (nextIndent > indent) {
                                 isNextLineNested = true;
                                 if (nextTrimmed.startsWith('-')) {
                                     isNextLineList = true;
                                 }
                             }
+                            break;
                         }
 
                         if (!isNextLineNested) {
                             parent[key] = '';
                         } else if (isNextLineList) {
                             parent[key] = [];
-                            stack.push({ obj: parent[key], indent: indent, key: key });
+                            stack.push({
+                                obj: parent[key],
+                                indent: indent,
+                                key: key,
+                                isArray: true,
+                                isArrayItem: false
+                            });
                         } else {
                             parent[key] = {};
-                            stack.push({ obj: parent[key], indent: indent, key: key });
+                            stack.push({
+                                obj: parent[key],
+                                indent: indent,
+                                key: key,
+                                isArray: false,
+                                isArrayItem: false
+                            });
                         }
-                    } else if (value === '[]') {
+                    }
+                    else if (value === '{}') {
+                        parent[key] = {};
+                    }
+                    else if (value === '[]') {
                         parent[key] = [];
-                        stack.push({ obj: parent[key], indent: indent, key: key });
-                    } else {
+                        stack.push({
+                            obj: parent[key],
+                            indent: indent,
+                            key: key,
+                            isArray: true,
+                            isArrayItem: false
+                        });
+                    }
+                    else {
                         parent[key] = this.parseValue(value);
                     }
                 }
             }
 
             if (multilineMode) {
-                const parent = stack[stack.length - 1].obj;
-                const key = multilineMode.key;
-
                 if (multilineMode.type === '"' || multilineMode.type === "'") {
                     const quoteChar = multilineMode.type;
                     const fullText = multilineMode.lines.join('\n');
-                    parent[key] = this.parseQuotedMultiline(fullText, quoteChar);
-                } else if (multilineMode.type === '|') {
+                    const parsedValue = this.parseQuotedMultiline(fullText, quoteChar);
+
+                    if (multilineMode.inArray) {
+                        multilineMode.array.push(parsedValue);
+                    } else {
+                        const parent = stack[stack.length - 1].obj;
+                        parent[multilineMode.key] = parsedValue;
+                    }
+                } else if (multilineMode.type === '|' || multilineMode.type === '|-') {
                     const contentLines = multilineMode.lines
                         .map(l => l.substring(multilineMode.startIndent + 2))
-                        .join('\n')
-                        .trimEnd();
-                    parent[key] = contentLines;
-                } else if (multilineMode.type === '>') {
+                        .join('\n');
+
+                    const finalContent = multilineMode.type === '|'
+                        ? contentLines.trimEnd() + '\n'
+                        : contentLines.trimEnd();
+
+                    if (multilineMode.inArray) {
+                        multilineMode.array.push(finalContent);
+                    } else {
+                        const parent = stack[stack.length - 1].obj;
+                        parent[multilineMode.key] = finalContent;
+                    }
+                } else if (multilineMode.type === '>' || multilineMode.type === '>-') {
                     const contentLines = multilineMode.lines
                         .map(l => l.substring(multilineMode.startIndent + 2).trim())
                         .filter(l => l !== '')
                         .join(' ');
-                    parent[key] = contentLines;
+
+                    const finalContent = multilineMode.type === '>'
+                        ? contentLines + '\n'
+                        : contentLines;
+
+                    if (multilineMode.inArray) {
+                        multilineMode.array.push(finalContent);
+                    } else {
+                        const parent = stack[stack.length - 1].obj;
+                        parent[multilineMode.key] = finalContent;
+                    }
                 }
             }
 
@@ -2080,28 +2570,6 @@ class CTFCreator {
             console.error('YAML parsing error:', error);
             throw new Error('Failed to parse YAML: ' + error.message);
         }
-    }
-
-    parseValue(value) {
-        value = value.trim();
-
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
-            return value.slice(1, -1);
-        }
-
-        if (value.startsWith('<') && value.endsWith('>')) {
-            return value.slice(1, -1);
-        }
-
-        if (value === 'true' || value === '<true|false>') return true;
-        if (value === 'false') return false;
-
-        if (value === 'null') return null;
-
-        if (!isNaN(value) && value !== '') return Number(value);
-
-        return value;
     }
 
     clearYAMLFile() {

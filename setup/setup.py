@@ -955,10 +955,18 @@ def setup_webserver():
     execute_command("sudo apt install -y ntpdate")
     execute_command("sudo ntpdate time.google.com")
 
-    # Install Apache, PHP, and composer on the webserver
+    # Install Apache, PHP, Redis and composer on the webserver
     print("\tInstalling Apache, PHP, and composer on the webserver")
     execute_command("sudo apt update")
-    execute_command("sudo apt install apache2 php libapache2-mod-php php-curl php-pgsql php-xml php-mbstring php-xdebug php-sockets php-imagick composer -y")
+    execute_command("sudo apt install apache2 php libapache2-mod-php php-curl php-pgsql php-xml php-mbstring php-xdebug php-sockets php-imagick composer redis-server php-redis -y")
+
+    # Changing Redis Configuration
+    print("\tChanging Redis Configuration")
+    execute_command("sudo systemctl enable redis")
+    execute_command("sudo cp /etc/redis/redis.conf /etc/redis/redis.conf.backup")
+    execute_command("sudo sed -i -e 's/^bind 127\.0\.0\.1 -::1/#bind 127.0.0.1 -::1/' -e 's/^port 6379$/port 0/' -e 's|^# unixsocket /run/redis/redis-server.sock|unixsocket /run/redis/redis-server.sock|' -e 's/^# unixsocketperm 700/unixsocketperm 770/' /etc/redis/redis.conf")
+    execute_command("sudo usermod -aG redis www-data")
+    execute_command("sudo systemctl restart redis")
 
     # Enable Apache modules
     print("\tEnabling Apache modules")
@@ -996,6 +1004,12 @@ def setup_webserver():
         os.path.join(WEBSERVER_FILES_DIR, ".env"),
         "/tmp/.env"
     )
+    # Copy the rate_limit.php file
+    print("\tCopying rate_limit.php file")
+    copy_file_to_server(
+        os.path.join(WEBSERVER_FILES_DIR, "rate_limit.php"),
+        "/tmp/rate_limit.php"
+    )
 
     # Copy the webserver files
     print("\tCopying webserver files")
@@ -1009,6 +1023,7 @@ def setup_webserver():
     execute_command("sudo mv /tmp/mpm_event.conf /etc/apache2/mods-available/mpm_event.conf")
     execute_command(f"sudo mv /tmp/php.ini /etc/php/{php_version}/apache2/php.ini")
     execute_command("sudo mv /tmp/000-default.conf /etc/apache2/sites-available/000-default.conf")
+    execute_command("sudo mv /tmp/rate_limit.php /var/www/rate_limit.php")
     execute_command("sudo mv /tmp/.env /var/www/.env")
     execute_command("sudo rm -rf /var/www/html")
     execute_command("sudo mv /tmp/html /var/www/html")
@@ -1036,6 +1051,9 @@ def setup_webserver():
 
     execute_command("sudo chown -R www-data:www-data /var/www/html/uploads")
     execute_command("sudo chmod -R 755 /var/www/html/uploads")
+
+    execute_command("sudo chown root:root /var/www/rate_limit.php")
+    execute_command("sudo chmod 644 /var/www/rate_limit.php")
 
     execute_command("sudo chown root:root /var/www/.env")
     execute_command("sudo chmod 644 /var/www/.env")

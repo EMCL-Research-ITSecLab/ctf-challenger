@@ -150,3 +150,36 @@ BEGIN
     RETURN ( SELECT is_admin FROM users WHERE id = p_user_id );
 END;
 $$;
+
+CREATE FUNCTION check_password_change(p_user_id BIGINT)
+    RETURNS BOOLEAN
+    LANGUAGE plpgsql
+SET plpgsql.variable_conflict = 'use_column'
+AS $$
+BEGIN
+RETURN COALESCE(
+        (SELECT password_reset FROM users WHERE id = p_user_id),
+        FALSE
+       );
+END;
+$$;
+
+CREATE FUNCTION get_password_reset_valid(p_user_id BIGINT)
+    RETURNS BOOLEAN
+    LANGUAGE plpgsql
+SET plpgsql.variable_conflict = 'use_column'
+AS $$
+DECLARE
+v_reset_timestamp TIMESTAMP;
+BEGIN
+SELECT password_reset_timestamp INTO v_reset_timestamp
+FROM users
+WHERE id = p_user_id;
+
+IF v_reset_timestamp IS NULL THEN
+        RETURN FALSE;
+END IF;
+
+RETURN (CURRENT_TIMESTAMP - v_reset_timestamp) <= INTERVAL '5 days';
+END;
+$$;

@@ -1270,14 +1270,15 @@ def generate_udf_migration(
 ):
     """
     Generate a migration SQL script that:
-      - Moves functions from 'public' schema to a dedicated schema.
+      - Moves functions from 'api' subdirectory to a dedicated schema.
+      - Adds functions from 'public' subdirectory to public schema (no move).
       - Sets the owner and SECURITY DEFINER.
       - Creates and configures a restricted user with limited access.
 
     Args:
         sql_dir: Directory containing .sql files with function definitions.
         output_file: Path for the generated migration SQL file.
-        target_schema: Schema to move the functions into.
+        target_schema: Schema to move the API functions into.
         owner_role: Database role that will own and define the functions.
         limited_user: Name of the restricted user to create.
         limited_user_password: Password for the restricted user.
@@ -1297,33 +1298,58 @@ def generate_udf_migration(
             funcs.append((fullname, args))
         return funcs
 
-    all_funcs = []
+    api_funcs = []
+    public_funcs = []
 
-    for root, _, files in os.walk(sql_dir):
-        for file in files:
-            if file.endswith(".sql"):
-                with open(os.path.join(root, file), "r", encoding="utf-8") as f:
-                    sql = f.read()
-                    funcs = parse_functions(sql)
-                    if funcs:
-                        all_funcs.extend(funcs)
+    api_dir = os.path.join(sql_dir, "api")
+    if os.path.exists(api_dir):
+        for root, _, files in os.walk(api_dir):
+            for file in files:
+                if file.endswith(".sql"):
+                    with open(os.path.join(root, file), "r", encoding="utf-8") as f:
+                        sql = f.read()
+                        funcs = parse_functions(sql)
+                        if funcs:
+                            api_funcs.extend(funcs)
+
+    public_dir = os.path.join(sql_dir, "public")
+    if os.path.exists(public_dir):
+        for root, _, files in os.walk(public_dir):
+            for file in files:
+                if file.endswith(".sql"):
+                    with open(os.path.join(root, file), "r", encoding="utf-8") as f:
+                        sql = f.read()
+                        funcs = parse_functions(sql)
+                        if funcs:
+                            public_funcs.extend(funcs)
 
     with open(output_file, "w", encoding="utf-8") as out:
         out.write(f"-- Auto-generated migration script\n")
-        out.write(f"-- Moves functions to schema '{target_schema}', "
-                  f"sets owner '{owner_role}', and configures restricted user '{limited_user}'\n\n")
+        out.write(f"-- Moves API functions to schema '{target_schema}', "
+                  f"sets owner '{owner_role}', and configures restricted user '{limited_user}'\n")
+        out.write(f"-- Public functions remain in public schema with postgres owner\n\n")
 
         # 1. Create target schema
         out.write(f"CREATE SCHEMA IF NOT EXISTS {target_schema} AUTHORIZATION {owner_role};\n\n")
 
-        # 2. Alter functions
-        for fullname, args in all_funcs:
-            func_name = fullname.split(".")[-1]
-            out.write(f"ALTER FUNCTION public.{func_name}({args}) SET SCHEMA {target_schema};\n")
-            out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) OWNER TO {owner_role};\n")
-            out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) SECURITY DEFINER;\n\n")
+        # 2. Alter API functions (move to target schema)
+        if api_funcs:
+            out.write(f"-- API Functions (moved to {target_schema} schema)\n")
+            for fullname, args in api_funcs:
+                func_name = fullname.split(".")[-1]
+                out.write(f"ALTER FUNCTION public.{func_name}({args}) SET SCHEMA {target_schema};\n")
+                out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) OWNER TO {owner_role};\n")
+                out.write(f"ALTER FUNCTION {target_schema}.{func_name}({args}) SECURITY DEFINER;\n\n")
 
-        # 3. Create restricted user and configure privileges
+        # 3. Set owner for public functions (stay in public schema)
+        if public_funcs:
+            out.write(f"-- Public Functions (remain in public schema with postgres owner)\n")
+            for fullname, args in public_funcs:
+                func_name = fullname.split(".")[-1]
+                out.write(f"ALTER FUNCTION public.{func_name}({args}) OWNER TO postgres;\n")
+                out.write(f"ALTER FUNCTION public.{func_name}({args}) SECURITY DEFINER;\n\n")
+
+        # 4. Create restricted user and configure privileges
         out.write(f"-- Create restricted user if not exists\n")
         out.write(f"DO $$ BEGIN\n")
         out.write(f"   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{limited_user}') THEN\n")

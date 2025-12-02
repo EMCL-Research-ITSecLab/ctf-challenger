@@ -180,7 +180,7 @@ class SecurityHelper implements ISecurityHelper
         return $isValid;
     }
 
-    public function validateSession(bool $logErrors = true): bool
+    public function validateSession(bool $logErrors = true, bool $checkPasswordChange = true): bool
     {
         try {
             if (!$this->hasValidSessionData()) {
@@ -198,6 +198,10 @@ class SecurityHelper implements ISecurityHelper
                 return false;
             }
 
+            if ($checkPasswordChange && $this->requiresPasswordChange()) {
+                $this->handlePasswordChangeRequired();
+            }
+
             return $this->session['authenticated'] === true;
 
         } catch (CustomException $e) {
@@ -207,6 +211,53 @@ class SecurityHelper implements ISecurityHelper
             // most likely not reachable, gonna leave it here for safety
             $this->logger->logError("Unexpected error during session validation: " . $e->getMessage());
             return false;
+        }
+    }
+
+    public function requiresPasswordChange(): bool
+    {
+        // Cache the result for 60 seconds to reduce DB load
+        $cacheKey = 'password_change_check';
+        $cacheTime = $this->session[$cacheKey . '_time'] ?? 0;
+
+        if (($this->system->time() - $cacheTime) < 60) {
+            return $this->session[$cacheKey] ?? false;
+        }
+
+        // Cache expired
+        try {
+            $databaseHelper = new DatabaseHelper($this->logger, $this->system);
+            $pdo = $databaseHelper->getPDO();
+
+            $userId = $this->session['user_id'] ?? 0;
+
+            $stmt = $pdo->prepare("SELECT checkPasswordChange(:user_id)");
+            $stmt->execute(['user_id' => $userId]);
+            $result = (bool)$stmt->fetchColumn();
+
+            $this->session[$cacheKey] = $result;
+            $this->session[$cacheKey . '_time'] = $this->system->time();
+
+            $this->logger->logDebug("Password change check for user {$userId}: " . ($result ? 'required' : 'not required'));
+
+            return $result;
+
+        } catch (PDOException $e) {
+            $this->logger->logError("Database error checking password change requirement: " . $e->getMessage());
+            // don't block access but log the issue
+            return false;
+        }
+    }
+
+    private function handlePasswordChangeRequired(): void
+    {
+        $allowedRoutes = ['/change-password', '/logout'];
+        $currentRoute = $this->server['REQUEST_URI'] ?? '';
+
+        $this->logger->logDebug("Redirecting user to password change - User ID: " . ($this->session['user_id'] ?? 'unknown'));
+
+        if (!in_array($currentRoute, $allowedRoutes)) {
+            header('Location: /change-password', true, 403);
         }
     }
 
@@ -256,7 +307,7 @@ class SecurityHelper implements ISecurityHelper
     {
         $stmt = $pdo->prepare("SELECT is_user_admin(:user_id) AS is_admin");
         if (!$stmt->execute([$userId])) {
-            throw new CustomException('Database query failed');
+            throw new Exception('Internal Server Error', 500);
         }
         return $stmt->fetchColumn();
     }

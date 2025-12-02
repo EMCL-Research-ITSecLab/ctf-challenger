@@ -79,10 +79,6 @@ $csrf_token = $securityHelper->generateCsrfToken();
         <div class="form-feedback" id="form-feedback"></div>
 
         <button type="submit" class="button button-primary">Update Password</button>
-
-        <p class="back-link">
-            <a href="/dashboard">&larr; Back to Dashboard</a>
-        </p>
     </form>
 </div>
 <script type="module" src="../assets/js/theme-toggle.js"></script>

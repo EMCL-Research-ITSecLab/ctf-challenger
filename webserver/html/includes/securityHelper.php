@@ -231,7 +231,7 @@ class SecurityHelper implements ISecurityHelper
 
             $userId = $this->session['user_id'] ?? 0;
 
-            $stmt = $pdo->prepare("SELECT checkPasswordChange(:user_id)");
+            $stmt = $pdo->prepare("SELECT check_password_change(:user_id)");
             $stmt->execute(['user_id' => $userId]);
             $result = (bool)$stmt->fetchColumn();
 
@@ -257,7 +257,7 @@ class SecurityHelper implements ISecurityHelper
         $this->logger->logDebug("Redirecting user to password change - User ID: " . ($this->session['user_id'] ?? 'unknown'));
 
         if (!in_array($currentRoute, $allowedRoutes)) {
-            header('Location: /change-password', true, 403);
+            header('Location: /reset-password', true, 302);
         }
     }
 

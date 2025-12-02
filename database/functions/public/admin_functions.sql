@@ -1,4 +1,4 @@
-#CREATE FUNCTION reset_user_password(
+CREATE FUNCTION reset_user_password(
     p_user_id BIGINT,
     p_cleartext_password TEXT
 )

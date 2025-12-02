@@ -962,7 +962,7 @@ def setup_webserver():
 
     # Changing Redis Configuration
     print("\tChanging Redis Configuration")
-    execute_command("sudo systemctl enable redis")
+    execute_command("sudo systemctl enable redis-server")
     execute_command("sudo cp /etc/redis/redis.conf /etc/redis/redis.conf.backup")
     execute_command("sudo sed -i -e 's/^bind 127\.0\.0\.1 -::1/#bind 127.0.0.1 -::1/' -e 's/^port 6379$/port 0/' -e 's|^# unixsocket /run/redis/redis-server.sock|unixsocket /run/redis/redis-server.sock|' -e 's/^# unixsocketperm 700/unixsocketperm 770/' /etc/redis/redis.conf")
     execute_command("sudo usermod -aG redis www-data")

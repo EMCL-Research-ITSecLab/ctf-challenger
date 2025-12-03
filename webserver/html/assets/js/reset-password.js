@@ -34,7 +34,6 @@ class ResetPasswordForm {
             const config = await response.json();
             this.config = config.user;
 
-            // Store password requirements
             this.config.MIN_PASSWORD_LENGTH = this.config.MIN_PASSWORD_LENGTH || 8;
             this.config.MAX_PASSWORD_LENGTH = this.config.MAX_PASSWORD_LENGTH || 255;
         } catch (error) {
@@ -43,9 +42,9 @@ class ResetPasswordForm {
     }
 
     setupRealTimeValidation() {
-        const currentPasswordField = this.form.querySelector('#current_password');
-        const newPasswordField = this.form.querySelector('#new_password');
-        const confirmPasswordField = this.form.querySelector('#confirm_password');
+        const currentPasswordField = this.form.querySelector('#current-password');
+        const newPasswordField = this.form.querySelector('#new-password');
+        const confirmPasswordField = this.form.querySelector('#confirm-password');
 
         if (currentPasswordField) {
             currentPasswordField.addEventListener('blur', () =>
@@ -131,9 +130,9 @@ class ResetPasswordForm {
             e.preventDefault();
             this.resetErrorStates();
 
-            const currentPassword = this.form.querySelector('#current_password')?.value;
-            const newPassword = this.form.querySelector('#new_password')?.value;
-            const confirmPassword = this.form.querySelector('#confirm_password')?.value;
+            const currentPassword = this.form.querySelector('#current-password')?.value;
+            const newPassword = this.form.querySelector('#new-password')?.value;
+            const confirmPassword = this.form.querySelector('#confirm-password')?.value;
 
             const isCurrentPasswordValid = this.validateCurrentPassword(currentPassword);
             const isNewPasswordValid = this.validateNewPassword(newPassword);
@@ -201,46 +200,13 @@ class ResetPasswordForm {
     }
 
     handleFormError(data) {
-        // Clear previous feedback
-        if (this.formFeedback) {
-            this.formFeedback.innerHTML = '';
-        }
-
-        // Display error in form feedback area
-        if (data.message) {
-            this.displayGeneralError(data.message);
-        }
-
-        // Map server errors to specific fields
-        let fieldFound = false;
-        for (const [keyword, fieldId] of Object.entries(this.errorMapping)) {
-            if (data.message && data.message.toLowerCase().includes(keyword.toLowerCase())) {
-                this.showError(fieldId, data.message);
-                fieldFound = true;
-
-                // If it's a password error, also highlight confirm password field
-                if (keyword === 'Password' || keyword === 'New password') {
-                    this.showError('confirm-password', data.message);
-                }
-            }
-        }
-
-        // If no specific field was found, show general error
-        if (!fieldFound) {
-            this.showError('current-password', data.message || 'An error occurred');
-        }
+        this.displayGeneralError(data.message || 'Password reset failed');
     }
 
     handleSuccessResponse(data) {
-        // Clear the form
         this.form.reset();
+        this.displayGeneralSuccess(data.message || 'Password updated successfully!');
 
-        // Show success message
-        if (this.formFeedback) {
-            this.formFeedback.innerHTML = `<div class="success-message">${data.message}</div>`;
-        }
-
-        // If there's a redirect, wait a moment then redirect
         if (data.redirect) {
             setTimeout(() => {
                 window.location.href = data.redirect;
@@ -251,7 +217,15 @@ class ResetPasswordForm {
     displayGeneralError(message) {
         if (!this.formFeedback) return;
 
-        this.formFeedback.innerHTML = `<div class="error-message-text">${message}</div>`;
+        this.formFeedback.textContent = message;
+        this.formFeedback.className = 'form-feedback error show';
+    }
+
+    displayGeneralSuccess(message) {
+        if (!this.formFeedback) return;
+
+        this.formFeedback.textContent = message;
+        this.formFeedback.className = 'form-feedback success show';
     }
 
     showError(fieldId, message) {
@@ -269,21 +243,19 @@ class ResetPasswordForm {
             errorElement.style.display = 'block';
             errorElement.style.visibility = 'visible';
             errorElement.style.opacity = '1';
+            errorElement.style.setProperty('background-color', 'transparent', 'important');
         }
     }
 
     resetErrorStates() {
-        // Clear input field errors
         document.querySelectorAll('.input-group input').forEach(field => {
             field.classList.remove('error');
         });
 
-        // Clear error icons
         document.querySelectorAll('.input-error-icon').forEach(icon => {
             icon.style.display = 'none';
         });
 
-        // Clear error messages
         document.querySelectorAll('.error-message').forEach(msg => {
             msg.textContent = '';
             msg.style.display = 'none';
@@ -291,9 +263,9 @@ class ResetPasswordForm {
             msg.style.opacity = '0';
         });
 
-        // Clear form feedback
         if (this.formFeedback) {
-            this.formFeedback.innerHTML = '';
+            this.formFeedback.textContent = '';
+            this.formFeedback.className = 'form-feedback';
         }
     }
 }

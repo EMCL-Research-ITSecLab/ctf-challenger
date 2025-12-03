@@ -1,10 +1,21 @@
 <?php
+declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 
 $securityHelper = new SecurityHelper();
 $securityHelper->initSecureSession();
-$csrf_token = $securityHelper->generateCsrfToken();
+
+if (!$securityHelper->validateSession()) {
+    header('Location: /404');
+    exit();
+}
+
+if (!$securityHelper->requiresPasswordChange()) {
+    header('Location: /dashboard');
+    exit();
+}
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,8 +40,6 @@ $csrf_token = $securityHelper->generateCsrfToken();
 </div>
 <div class="reset-password-container">
     <form class="reset-password-form" id="resetPasswordForm" method="POST">
-        <input type="hidden" name="csrf_token" id="csrf_token"
-               value="<?php echo htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES); ?>">
         <h2>Reset Password</h2>
 
         <!-- Current Password -->

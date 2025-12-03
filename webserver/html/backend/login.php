@@ -66,8 +66,33 @@ class LoginHandler
     private function checkAlreadyAuthenticated(): void
     {
         if ($this->securityHelper->validateSession(false) && !empty($this->session['authenticated'])) {
-            $this->handleAlreadyAuthenticated();
+            if ($this->securityHelper->requiresPasswordChange()) {
+                $this->redirectToPasswordChange();
+            } else {
+                $this->handleAlreadyAuthenticated();
+            }
         }
+    }
+
+    private function redirectToPasswordChange(): void
+    {
+        $userId = $this->session['user_id'];
+        $this->logger->logDebug("User requires password change - User ID: $userId");
+
+        if (!isset($this->session['csrf_token'])) {
+            $this->securityHelper->generateCsrfToken();
+            $this->logger->logDebug("Generated new CSRF token for user ID: $userId");
+        }
+
+        $csrf = $this->session['csrf_token'];#
+        $this->setCsrfCookie($csrf);
+
+        echo json_encode([
+            'success' => true,
+            'redirect' => '/reset-password',
+            'csrf_token' => $csrf
+        ]);
+        defined('PHPUNIT_RUNNING') || exit;
     }
 
     private function handleAlreadyAuthenticated(): void

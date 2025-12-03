@@ -90,6 +90,7 @@ if (!$securityHelper->requiresPasswordChange()) {
         <button type="submit" class="button button-primary">Update Password</button>
     </form>
 </div>
+<?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>
 <script type="module" src="../assets/js/theme-toggle.js"></script>
 <script type="module" src="../assets/js/reset-password.js"></script>
 </body>

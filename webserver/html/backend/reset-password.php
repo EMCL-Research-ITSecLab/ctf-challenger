@@ -98,7 +98,7 @@ class ChangePasswordHandler
     {
         $csrfToken = $this->cookie['csrf_token'] ?? '';
         if (!$this->securityHelper->validateCsrfToken($csrfToken)) {
-            $this->logger->logWarning("Invalid CSRF token in dashboard - User ID: $this->userId, Token: $csrfToken");
+            $this->logger->logWarning("Invalid CSRF token in reset-password - User ID: $this->userId, Token: $csrfToken");
             throw new CustomException('Invalid CSRF token', 403);
         }
     }
@@ -168,6 +168,8 @@ class ChangePasswordHandler
             ]);
 
             $this->pdo->commit();
+            unset($this->session['password_change_check']);
+            unset($this->session['password_change_check_time']);
 
             $this->logger->logDebug("Password changed successfully - User ID: $this->userId");
 

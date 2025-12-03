@@ -251,12 +251,13 @@ class SecurityHelper implements ISecurityHelper
 
     private function handlePasswordChangeRequired(): void
     {
-        $allowedRoutes = ['/change-password', '/logout'];
+        $allowedRoutes = ['/reset-password', '/backend/logout.php', '/backend/login.php'];
         $currentRoute = $this->server['REQUEST_URI'] ?? '';
 
         $this->logger->logDebug("Redirecting user to password change - User ID: " . ($this->session['user_id'] ?? 'unknown'));
 
         if (!in_array($currentRoute, $allowedRoutes)) {
+            $this->logger->logDebug("test:" . $currentRoute);
             header('Location: /reset-password', true, 302);
         }
     }

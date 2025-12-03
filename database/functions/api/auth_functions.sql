@@ -139,7 +139,9 @@ AS $$
 BEGIN
     UPDATE users
     SET password_hash = p_new_password_hash,
-        password_salt = p_new_password_salt
+        password_salt = p_new_password_salt,
+        password_reset = False,
+        password_reset_timestamp = NULL
     WHERE id = p_user_id AND password_hash = p_old_password_hash;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Old password does not match';

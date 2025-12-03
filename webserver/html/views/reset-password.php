@@ -24,6 +24,7 @@ if (!$securityHelper->requiresPasswordChange()) {
     <title>Reset Password - CTF Challenger</title>
     <link rel="stylesheet" href="../assets/css/base.css">
     <link rel="stylesheet" href="../assets/css/reset-password.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 <div class="theme-switch">
@@ -44,9 +45,9 @@ if (!$securityHelper->requiresPasswordChange()) {
 
         <!-- Current Password -->
         <div class="input-group password-container has-icon">
-            <label for="current_password">Current Password</label>
-            <div class="input-wrapper">
-                <input type="password" id="current_password" name="current_password"
+            <label for="current-password">Current Password</label>
+            <div class="password-wrapper input-wrapper">
+                <input type="password" id="current-password" name="current_password"
                        placeholder="Enter your current password" required>
                 <button type="button" class="password-toggle" aria-label="Toggle password visibility">
                     <i class="fa-solid fa-eye"></i>
@@ -58,9 +59,9 @@ if (!$securityHelper->requiresPasswordChange()) {
 
         <!-- New Password -->
         <div class="input-group password-container has-icon">
-            <label for="new_password">New Password</label>
-            <div class="input-wrapper">
-                <input type="password" id="new_password" name="new_password"
+            <label for="new-password">New Password</label>
+            <div class="password-wrapper input-wrapper">
+                <input type="password" id="new-password" name="new_password"
                        placeholder="Enter your new password" required>
                 <button type="button" class="password-toggle" aria-label="Toggle password visibility">
                     <i class="fa-solid fa-eye"></i>
@@ -72,9 +73,9 @@ if (!$securityHelper->requiresPasswordChange()) {
 
         <!-- Confirm New Password -->
         <div class="input-group password-container has-icon">
-            <label for="confirm_password">Confirm New Password</label>
-            <div class="input-wrapper">
-                <input type="password" id="confirm_password" name="confirm_password"
+            <label for="confirm-password">Confirm New Password</label>
+            <div class="password-wrapper input-wrapper">
+                <input type="password" id="confirm-password" name="confirm_password"
                        placeholder="Confirm your new password" required>
                 <button type="button" class="password-toggle" aria-label="Toggle password visibility">
                     <i class="fa-solid fa-eye"></i>
@@ -84,10 +85,14 @@ if (!$securityHelper->requiresPasswordChange()) {
             <small class="error-message" id="confirm-password-error"></small>
         </div>
 
+        <button type="submit" class="button button-primary">Update Password</button>
+
         <!-- Form Feedback Area -->
         <div class="form-feedback" id="form-feedback"></div>
 
-        <button type="submit" class="button button-primary">Update Password</button>
+        <p class="back-link">
+            <a href="/dashboard">Back to Dashboard</a>
+        </p>
     </form>
 </div>
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>

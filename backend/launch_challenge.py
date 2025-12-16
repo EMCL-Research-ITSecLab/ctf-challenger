@@ -12,6 +12,7 @@ import time
 from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
+from launch_timing_logger import launch_timing_logger
 
 load_dotenv(find_dotenv())
 
@@ -28,7 +29,6 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 challenge_launch_lock_dir = "/var/lock/challenge_launch_locks/"
 os.makedirs(challenge_launch_lock_dir, exist_ok=True)
 
-
 @retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
        reraise=True)
 def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_device, dmz_monitoring_device):
@@ -39,8 +39,10 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
     launch_lock = acquire_exclusive_launch_lock(user_id)
 
     try:
+        start_time = time.time()
         with db_conn:
             try:
+                start_time_db_fetch = time.time()
                 user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
                 user_email = fetch_user_email(user_id, db_conn)
                 challenge_template = ChallengeTemplate(challenge_template_id)
@@ -48,6 +50,8 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
                 fetch_network_and_connection_templates(challenge_template, db_conn)
                 fetch_domain_templates(challenge_template, db_conn)
                 fetch_challenge_flags(challenge_template, db_conn)
+
+                launch_timing_logger(start_time_db_fetch, "[DB FETCH COMPLETE]", challenge_template_id, user_id)
             except Exception as e:
                 raise ValueError(f"Error fetching from database: {e}")
 
@@ -57,24 +61,40 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
                 raise ValueError(f"Error creating challenge: {e}")
 
             try:
+                start_time_machine_clone = time.time()
                 clone_machines(challenge_template, challenge, db_conn)
+                launch_timing_logger(start_time_machine_clone, "[MACHINE CLONE COMPLETE]", challenge_template_id, user_id)
+
+                # Network setup
+                start_time_network = time.time()
                 attach_vrtmon_network(challenge)
                 create_networks_and_connections(challenge_template, challenge, user_id, db_conn)
                 create_domains(challenge_template, challenge, db_conn)
                 create_network_devices(challenge)
                 wait_for_networks_to_be_up(challenge)
 
-                # Attach final networks and start VMs
                 attach_networks_to_vms(challenge)
                 start_dnsmasq_instances(challenge, user_vpn_ip)
+                launch_timing_logger(start_time_network, "[NETWORK SETUP COMPLETE]", challenge_template_id, user_id)
+
+                start_time_vm_boot = time.time()
                 launch_machines(challenge)
+                launch_timing_logger(start_time_vm_boot, "[VM BOOT COMPLETE]", challenge_template_id, user_id)
 
+                start_time_wazuh = time.time()
                 configure_wazuh_for_challenge(challenge)
+                launch_timing_logger(start_time_wazuh, "[WAZUH CONFIG COMPLETE]", challenge_template_id, user_id)
 
+                start_time_user_flags = time.time()
                 process_all_user_specific_flags(challenge, user_email)
+                launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
+
 
                 add_running_challenge_to_user(challenge, user_id, db_conn)
+
+                start_time_firewall = time.time()
                 add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
+                launch_timing_logger(start_time_firewall, "[FIREWALL RULES COMPLETE]", challenge_template_id, user_id)
 
             except Exception as e:
                 undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn)
@@ -82,6 +102,9 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
 
             accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
             accessible_networks.sort()
+
+        launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, user_id)
+
     except Exception as e:
         raise e
     finally:
@@ -265,9 +288,6 @@ def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101")
     """
     Configure Wazuh for all machines in a challenge via QEMU Guest Agent
     """
-    # Wait for all VMs to boot and qemu-ga to be ready
-    for machine in challenge.machines.values():
-        wait_for_qemu_guest_agent(machine)
 
     # Configure Wazuh on all machines
     for machine in challenge.machines.values():
@@ -794,6 +814,10 @@ def launch_machines(challenge):
 
     for machine in challenge.machines.values():
         launch_vm_api_call(machine)
+
+    # Wait for all VMs to boot and qemu-ga to be ready
+    for machine in challenge.machines.values():
+        wait_for_qemu_guest_agent(machine)
 
 
 def add_running_challenge_to_user(challenge, user_id, db_conn):

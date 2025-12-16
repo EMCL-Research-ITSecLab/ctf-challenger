@@ -9,6 +9,7 @@ class ChallengeTemplate:
         self.connection_templates = {}
         self.domain_templates = {}
         self.challenge_subnet = None
+        self.flags = []
 
     def add_machine_template(self, machine_template):
         self.machine_templates[machine_template.id] = machine_template

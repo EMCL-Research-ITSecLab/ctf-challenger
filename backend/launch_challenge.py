@@ -303,16 +303,36 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
     Wait until QEMU Guest Agent is ready
     """
     start_time = time.time()
+    ping_start_time = time.time()
+    response_start_time = None
+
+    ping_successful = False
 
     while time.time() - start_time < timeout:
-        try:
-            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
 
-            if result.returncode == 0:
-                return True
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-            pass
+        if not ping_successful:
+            try:
+                cmd_ping = f"qm guest ping {machine.id}"
+                result_ping = subprocess.run(cmd_ping, shell=True, capture_output=True, text=True, timeout=10)
+
+                if result_ping.returncode == 0:
+                    launch_timing_logger(ping_start_time, "[GUEST AGENT PINGED]", machine.challenge.template.id, None, VM_ID=machine.id)
+                    ping_successful = True
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                pass
+
+        else:
+            if response_start_time is None:
+                response_start_time = time.time()
+            try:
+                cmd = f"qm guest exec {machine.id} -- echo 'ready'"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+
+                if result.returncode == 0:
+                    launch_timing_logger(response_start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
+                    return True
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+                pass
 
         time.sleep(5)
 
@@ -327,17 +347,22 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
     vrtmon_gw = "fd12:3456:789a:1::1"
     agent_name = f"Agent_{machine.id}"
 
+    network_setup_start_time = time.time()
     # Step 1: Configure IPv6
     cmd = f"""iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
     ip -6 addr add {ipv6}/64 dev $iface && \
     ip -6 route add default via {vrtmon_gw}"""
 
     subprocess.run(f"qm guest exec {machine.id} -- bash -c '{cmd}'", shell=True, capture_output=True, text=True)
+    launch_timing_logger(network_setup_start_time, "[WAZUH IPv6 CONFIGURED]", machine.challenge.template.id, None, VM_ID=machine.id)
 
+    stop_running_agent_start_time = time.time()
     # Step 2: Stop Wazuh agent if running
     cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "stop", "wazuh-agent"]
     subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # Ignore errors
+    launch_timing_logger(stop_running_agent_start_time, "[WAZUH AGENT STOPPED]", machine.challenge.template.id, None, VM_ID=machine.id)
 
+    register_start_time = time.time()
     # Step 3: Register agent with manager
     cmd = [
         "qm", "guest", "exec", str(machine.id), "--",
@@ -354,22 +379,37 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
     if result.returncode != 0:
         raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
 
+    launch_timing_logger(register_start_time, "[WAZUH AGENT REGISTERED]", machine.challenge.template.id, None, VM_ID=machine.id)
+
+    reload_start_time = time.time()
     # Step 4: Start Wazuh agent
     cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "daemon-reload"]
     subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    launch_timing_logger(reload_start_time, "[WAZUH DAEMON RELOADED]", machine.challenge.template.id, None, VM_ID=machine.id)
 
+
+    enable_start_time = time.time()
     cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "enable", "wazuh-agent"]
     subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    launch_timing_logger(enable_start_time, "[WAZUH AGENT ENABLED]", machine.challenge.template.id, None, VM_ID=machine.id)
 
+    start_running_agent_start_time = time.time()
     cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "start", "wazuh-agent"]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
 
     if result.returncode != 0:
         raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
 
+    launch_timing_logger(start_running_agent_start_time, "[WAZUH AGENT STARTED]", machine.challenge.template.id, None,
+                         VM_ID=machine.id)
+
+
+    cleanup_start_time = time.time()
     # Step 5: Clean up monitoring directory
     cmd = ["qm", "guest", "exec", str(machine.id), "--", "rm", "-rf", "/var/monitoring"]
     subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    launch_timing_logger(cleanup_start_time, "[WAZUH CLEANUP COMPLETE]", machine.challenge.template.id, None, VM_ID=machine.id)
 
 
 def generate_user_specific_flag(flag_secret, user_email):
@@ -424,6 +464,8 @@ def write_user_specific_flags_to_vm(machine, flags, user_email):
     Write user-specific flags to a VM via QEMU Guest Agent.
     """
     for flag in flags:
+        start_flag_write_time = time.time()
+
         order_index = flag['order_index']
         flag_secret = flag['flag']
 
@@ -440,6 +482,8 @@ def write_user_specific_flags_to_vm(machine, flags, user_email):
 
         if result.returncode != 0:
             raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
+
+        launch_timing_logger(start_flag_write_time, f"[FLAG {order_index} WRITTEN]", machine.challenge.template.id, None, VM_ID=machine.id)
 
         print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
 

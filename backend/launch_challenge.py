@@ -303,36 +303,17 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
     Wait until QEMU Guest Agent is ready
     """
     start_time = time.time()
-    ping_start_time = time.time()
-    response_start_time = None
-
-    ping_successful = False
 
     while time.time() - start_time < timeout:
+        try:
+            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
 
-        if not ping_successful:
-            try:
-                cmd_ping = f"qm guest ping {machine.id}"
-                result_ping = subprocess.run(cmd_ping, shell=True, capture_output=True, text=True, timeout=10)
-
-                if result_ping.returncode == 0:
-                    launch_timing_logger(ping_start_time, "[GUEST AGENT PINGED]", machine.challenge.template.id, None, VM_ID=machine.id)
-                    ping_successful = True
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-                pass
-
-        else:
-            if response_start_time is None:
-                response_start_time = time.time()
-            try:
-                cmd = f"qm guest exec {machine.id} -- echo 'ready'"
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-
-                if result.returncode == 0:
-                    launch_timing_logger(response_start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
-                    return True
-            except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-                pass
+            if result.returncode == 0:
+                launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
+                return True
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            pass
 
         time.sleep(5)
 

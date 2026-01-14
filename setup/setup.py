@@ -1514,7 +1514,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={BACKEND_FILES_DIR}
-ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/main.py
+ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/api.py
 Restart=always
 RestartSec=5
 TimeoutStartSec=0

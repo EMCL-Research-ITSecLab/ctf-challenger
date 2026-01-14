@@ -430,6 +430,15 @@ CREATE TABLE challenge_subnets
     available boolean NOT NULL
 );
 
+CREATE TYPE challenge_lifecycle_state AS ENUM (
+    'PROVISIONING',
+    'READY',
+    'ASSIGNED',
+    'ACTIVE',
+    'EXPIRED',
+    'TERMINATING'
+);
+
 
 CREATE TABLE challenges (
     id BIGINT PRIMARY KEY DEFAULT allocate_challenge_id(),
@@ -437,6 +446,8 @@ CREATE TABLE challenges (
     subnet INET REFERENCES challenge_subnets(subnet) ON DELETE CASCADE DEFAULT assign_challenge_subnet(),
     expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour'),
     used_extensions BIGINT DEFAULT 0,
+    pre_assigned_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    lifecycle_state challenge_lifecycle_state NOT NULL,
     FOREIGN KEY (challenge_template_id) REFERENCES challenge_templates(id) ON DELETE CASCADE
 );
 

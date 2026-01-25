@@ -7,6 +7,7 @@ from proxmox_api_calls import *
 import os
 import shlex
 from teardown_challenge import delete_iptables_rules, remove_database_entries, stop_dnsmasq_instances, remove_challenge_from_wazuh, stop_machines, delete_machines, delete_network_devices
+from warmup_challenge import warmup_challenge
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 import time
 from dotenv import load_dotenv, find_dotenv
@@ -54,6 +55,9 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
 
             try:
                 challenge = get_ready_challenge(challenge_template, db_conn)
+                if challenge is None:
+                    challenge = warmup_challenge(user_id, challenge_template, db_conn, vpn_monitoring_device, dmz_monitoring_device)
+
                 fetch_machines(challenge, db_conn)
                 fetch_networks_and_connections(challenge, db_conn)
 

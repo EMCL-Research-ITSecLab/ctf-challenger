@@ -65,9 +65,18 @@ class PoolManager:
         Main loop of the pool manager to check and maintain the hot pool.
         """
 
+        worker_threads = []
+
         while True:
             try:
-                self.check_and_maintain_pool()
+                worker_threads.append(threading.Thread(target=self.check_and_maintain_pool, daemon=True))
+                worker_threads.append(threading.Thread(target=self.teardown_expired_challenges, daemon=True))
+
+                for thread in worker_threads:
+                    thread.start()
+                for thread in worker_threads:
+                    thread.join()
+
             except Exception as e:
                 print(f"Error in pool manager loop: {e}")
             finally:

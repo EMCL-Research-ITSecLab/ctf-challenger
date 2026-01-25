@@ -435,7 +435,8 @@ CREATE TABLE pool_sizes
     challenge_template_id BIGINT NOT NULL REFERENCES challenge_templates(id) ON DELETE CASCADE,
     effective_time TIMESTAMP NOT NULL,
     size INT NOT NULL,
-    PRIMARY KEY (challenge_template_id, day, hour)
+    manual_override BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (challenge_template_id, effective_time)
 );
 
 CREATE TYPE challenge_lifecycle_state AS ENUM (

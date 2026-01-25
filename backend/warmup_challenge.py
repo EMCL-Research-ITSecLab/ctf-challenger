@@ -38,7 +38,6 @@ def warmup_challenge(pre_assigned_user_id, challenge_template_id, db_conn, vpn_m
                 fetch_machines(challenge_template, db_conn)
                 fetch_network_and_connection_templates(challenge_template, db_conn)
                 fetch_domain_templates(challenge_template, db_conn)
-                fetch_challenge_flags(challenge_template, db_conn)
 
                 launch_timing_logger(start_time_db_fetch, "[DB FETCH COMPLETE]", challenge_template_id, pre_assigned_user_id)
             except Exception as e:
@@ -80,10 +79,9 @@ def warmup_challenge(pre_assigned_user_id, challenge_template_id, db_conn, vpn_m
                 undo_launch_challenge(challenge, db_conn)
                 raise ValueError(f"Error launching challenge: {e}")
 
-            accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
-            accessible_networks.sort()
-
         launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, pre_assigned_user_id)
+
+        return challenge
 
     except Exception as e:
         raise e

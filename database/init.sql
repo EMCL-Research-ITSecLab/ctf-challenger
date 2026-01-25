@@ -430,6 +430,14 @@ CREATE TABLE challenge_subnets
     available boolean NOT NULL
 );
 
+CREATE TABLE pool_sizes
+(
+    challenge_template_id BIGINT NOT NULL REFERENCES challenge_templates(id) ON DELETE CASCADE,
+    effective_time TIMESTAMP NOT NULL,
+    size INT NOT NULL,
+    PRIMARY KEY (challenge_template_id, day, hour)
+);
+
 CREATE TYPE challenge_lifecycle_state AS ENUM (
     'PROVISIONING',
     'READY',

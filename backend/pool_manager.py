@@ -44,8 +44,8 @@ class PoolManager:
     """
 
     def __init__(self, db_conn, minimal_pool_size=1, check_interval_seconds=10):
-        self.running_warmups = {} # challenge_instance_id -> threading.Thread
-        self.running_teardowns = {} # challenge_instance_id -> threading.Thread
+        self.running_warmups = {} # Thread ID -> challenge_template_id for currently running warmups
+        self.running_teardowns = {} # Thread ID -> challenge_template_id for currently running teardowns
 
         self.minimal_pool_size = minimal_pool_size
         self.check_interval_seconds = check_interval_seconds

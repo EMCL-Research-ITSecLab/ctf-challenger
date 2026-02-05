@@ -88,10 +88,12 @@ WEBSERVER_DATABASE_PASSWORD = os.getenv("WEBSERVER_DATABASE_PASSWORD")
 MONITORING_VPN_INTERFACE = os.getenv("MONITORING_VPN_INTERFACE", "ctf_monitoring")
 MONITORING_DMZ_INTERFACE = os.getenv("MONITORING_DMZ_INTERFACE", "dmz_monitoring")
 MONITORING_HOST = os.getenv("MONITORING_HOST", "10.0.0.103")
+MONITORING_VM_ID = os.getenv("MONITORING_VM_ID", "9000")
 WAZUH_PORT = os.getenv("WAZUH_API_PORT", "55000")
 WAZUH_USER = os.getenv("WAZUH_API_USER", "wazuh-wui")
 WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 WAZUH_ENROLLMENT_PASSWORD = os.getenv("WAZUH_ENROLLMENT_PASSWORD", "")
+WAZUH_NETWORK_DEVICE = os.getenv("WAZUH_NETWORK_DEVICE", BACKEND_NETWORK_DEVICE)
 
 LECTURE_SIGNUP_TOKEN = os.getenv("LECTURE_SIGNUP_TOKEN", "dummy-token")
 
@@ -161,6 +163,9 @@ def setup():
 
     print("\nStarting backend")
     start_backend()
+
+    print("\tSetting up pool manager service")
+    start_pool_manager()
 
     print("\nSetting up cleanup service")
     setup_cleanup_service()
@@ -399,10 +404,12 @@ def generate_and_distribute_env_files(backend_api_token, web_server_api_token):
         backend_env_file.write(f"MONITORING_VPN_INTERFACE='{MONITORING_VPN_INTERFACE}'\n")
         backend_env_file.write(f"MONITORING_DMZ_INTERFACE='{MONITORING_DMZ_INTERFACE}'\n")
         backend_env_file.write(f"MONITORING_HOST='{MONITORING_HOST}'\n")
+        backend_env_file.write(f"MONITORING_VM_ID={MONITORING_VM_ID}\n")
         backend_env_file.write(f"WAZUH_API_PORT='{WAZUH_PORT}'\n")
         backend_env_file.write(f"WAZUH_API_USER='{WAZUH_USER}'\n")
         backend_env_file.write(f"WAZUH_API_PASSWORD='{WAZUH_PASSWORD}'\n")
         backend_env_file.write(f"WAZUH_ENROLLMENT_PASSWORD='{WAZUH_ENROLLMENT_PASSWORD}'\n")
+        backend_env_file.write(f"WAZUH_NETWORK_DEVICE='{WAZUH_NETWORK_DEVICE}'\n")
 
     print("\tGenerating testing .env file")
     with open(os.path.join(TESTING_FILES_DIR, ".env"), "w") as testing_env_file:
@@ -1537,7 +1544,7 @@ def start_pool_manager():
     """
     Start the pool manager service.
     """
-    print("\tSetting up pool manager service")
+
     pool_manager_service = f"""[Unit]
 Description=Pool Manager Service
 After=network.target
@@ -1545,7 +1552,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={BACKEND_FILES_DIR}
-ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/pool_manager.py
+ExecStart=/usr/bin/python3 -u {BACKEND_FILES_DIR}/pool_manager.py
 Restart=always
 RestartSec=5
 TimeoutStartSec=0

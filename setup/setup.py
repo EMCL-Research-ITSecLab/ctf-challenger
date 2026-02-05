@@ -1406,14 +1406,15 @@ def setup_database(conn=None, create_admin_config=True):
     with conn.cursor() as cursor:
         cursor.execute(init_script)
 
-    for functions_file in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions")):
-        if functions_file.endswith(".sql"):
-            if not connection_managed_externally:
-                print(f"\tExecuting functions/{functions_file} script")
-            with open(os.path.join(DATABASE_FILES_DIR, "functions", functions_file), "r") as file:
-                functions_script = file.read()
-            with conn.cursor() as cursor:
-                cursor.execute(functions_script)
+    for schema_dir in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions")):
+        for functions_file in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions", schema_dir)):
+            if functions_file.endswith(".sql"):
+                if not connection_managed_externally:
+                    print(f"\tExecuting functions/{functions_file} script")
+                with open(os.path.join(DATABASE_FILES_DIR, "functions", schema_dir, functions_file), "r") as file:
+                    functions_script = file.read()
+                with conn.cursor() as cursor:
+                    cursor.execute(functions_script)
 
     if not connection_managed_externally:
         print("\tGenerating and executing UDF migration script")

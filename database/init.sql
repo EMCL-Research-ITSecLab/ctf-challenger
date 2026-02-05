@@ -420,7 +420,8 @@ CREATE TABLE challenge_templates (
     creator_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     hint TEXT,
     solution TEXT,
-    marked_for_deletion BOOLEAN DEFAULT FALSE
+    marked_for_deletion BOOLEAN DEFAULT FALSE,
+    ready_to_launch BOOLEAN DEFAULT FALSE
 );
 
 

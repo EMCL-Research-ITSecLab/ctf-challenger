@@ -1526,6 +1526,36 @@ WantedBy=multi-user.target
     subprocess.run(["systemctl", "start", "backend"], check=True, capture_output=True)
 
 
+def start_pool_manager():
+    """
+    Start the pool manager service.
+    """
+    print("\tSetting up pool manager service")
+    pool_manager_service = f"""[Unit]
+Description=Pool Manager Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={BACKEND_FILES_DIR}
+ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/pool_manager.py
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    with open(os.path.join(SYSTEMD_PATH, "pool_manager.service"), "w") as service_file:
+        service_file.write(pool_manager_service)
+
+    print("\tEnabling and starting pool manager service")
+    subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
+    subprocess.run(["systemctl", "enable", "pool_manager"], check=True, capture_output=True)
+    subprocess.run(["systemctl", "start", "pool_manager"], check=True, capture_output=True)
+
+
 def setup_cleanup_service():
     """
     Setup the cleanup script.

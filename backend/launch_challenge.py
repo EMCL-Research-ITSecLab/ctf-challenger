@@ -1,5 +1,6 @@
 import random
 import subprocess
+import threading
 
 from subnet_calculations import nth_network_subnet
 from DatabaseClasses import *
@@ -45,7 +46,7 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
             try:
                 start_time_db_fetch = time.time()
                 user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
-                user_email = fetch_user_email(user_id, db_conn)
+                user_unique_id = fetch_user_unique_id(user_id, db_conn)
                 challenge_template = ChallengeTemplate(challenge_template_id)
                 fetch_challenge_flags(challenge_template, db_conn)
 
@@ -71,7 +72,7 @@ def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_dev
                 launch_timing_logger(start_time_network, "[NETWORK SETUP COMPLETE]", challenge_template_id, user_id)
 
                 start_time_user_flags = time.time()
-                process_all_user_specific_flags(challenge, user_email)
+                process_all_user_specific_flags(challenge, user_unique_id)
                 launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
 
                 add_running_challenge_to_user(challenge, user_id, db_conn)
@@ -317,53 +318,64 @@ def process_all_user_specific_flags(challenge, user_unique_id):
             machine_template_id = flag['machine_template_id']
             if machine_template_id not in flags_by_machine:
                 flags_by_machine[machine_template_id] = []
-            flags_by_machine[machine_template_id].append(flag)
 
-    for machine_template_id, flags in flags_by_machine.items():
-        machine = None
-        for m in challenge.machines.values():
-            if m.template.id == machine_template_id:
-                machine = m
-                break
+            machine = None
+            for m in challenge.machines.values():
+                if m.template.id == machine_template_id:
+                    machine = m
+                    break
 
-        if machine is None:
-            print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
-            continue
+                if machine is None:
+                    print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
+                    continue
 
-        try:
-            write_user_specific_flags_to_vm(machine, flags, user_unique_id)
-        except Exception as e:
-            print(f"[Error] Failed to write flags to VM {machine.id}: {e}", flush=True)
-            raise
+            user_flag = generate_user_specific_flag(flag['flag'], user_unique_id)
+            flag_path = f"/root/flag_{flag['order_index']}.txt"
+            flags_by_machine[machine.id].append({
+                'flag': user_flag,
+                'path': flag_path,
+            })
+
+    try:
+        flag_write_threads = []
+        for machine_id, flags in flags_by_machine.items():
+            flag_write_threads.append(threading.Thread(target=write_user_specific_flags_to_vm, args=(machine_id, flags)))
+
+        for thread in flag_write_threads:
+            thread.start()
+
+        for thread in flag_write_threads:
+            thread.join()
+
+    except Exception as e:
+        print(f"[Error] Failed to write user-specific flags to VMs: {e}", flush=True)
+        raise
 
 
-def write_user_specific_flags_to_vm(machine, flags, user_unique_id):
+def write_user_specific_flags_to_vm(machine_id, flags):
     """
     Write user-specific flags to a VM via QEMU Guest Agent.
     """
+    start_flag_write_time = time.time()
+
+    flag_write_command = ""
     for flag in flags:
-        start_flag_write_time = time.time()
+        escaped_flag = shlex.quote(flag['flag'])
+        flag_path = flag['path']
 
-        order_index = flag['order_index']
-        flag_secret = flag['flag']
+        flag_write_command += f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path} && "
 
-        personalized_flag = generate_user_specific_flag(flag_secret, user_unique_id)
-
-        flag_path = f"/root/flag_{order_index}.txt"
-
-        escaped_flag = shlex.quote(personalized_flag)
-
-        cmd = ["qm", "guest", "exec", str(machine.id), "--",
-               "bash", "-c", f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path}"]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if flag_write_command != "":
+        flag_write_command = flag_write_command.rstrip(" && ")
+        result = subprocess.run(["qm", "guest", "exec", str(machine_id), "--",
+                    "bash", "-c", flag_write_command], capture_output=True, text=True)
 
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
+            raise RuntimeError(f"Failed to write flags to VM {machine_id}: {result.stderr}")
 
-        launch_timing_logger(start_flag_write_time, f"[FLAG {order_index} WRITTEN]", machine.challenge.template.id, None, VM_ID=machine.id)
+    launch_timing_logger(start_flag_write_time, f"[FLAG WRITE COMPLETE]", None, None, VM_ID=machine_id)
 
-        print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
+    print(f"[Info] Successfully wrote flags to VM {machine_id}", flush=True)
 
 
 def generate_mac_address(machine_id, local_network_id, local_connection_id):
@@ -403,7 +415,7 @@ def fetch_user_vpn_ip(user_id, db_conn):
     return user_vpn_ip
 
 
-def fetch_user_email(user_id, db_conn):
+def fetch_user_unique_id(user_id, db_conn):
     """
     Fetch the email address for the given user ID.
     """

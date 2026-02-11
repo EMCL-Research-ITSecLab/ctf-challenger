@@ -1,4 +1,3 @@
-import psycopg2
 from dotenv import load_dotenv
 import os
 import threading
@@ -7,17 +6,12 @@ import math
 import subprocess
 import time
 import traceback
+from get_db_connection import get_db_connection
 
-from warmup_challenge import warmup_challenge as warmup_challenge
+from warmup_challenge import warmup_challenge as warmup_challenge_backend
 from teardown_challenge import teardown_challenge as teardown_challenge_backend
 
 load_dotenv()
-
-# Database connection parameters
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_NAME = os.getenv("DB_NAME", "exampledb")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "changeme")
 
 POOL_MANAGER_LOGGING_DIR = os.getenv("POOL_MANAGER_LOGGING_DIR", "/var/log/pool_manager")
 
@@ -71,25 +65,12 @@ def system_is_ready_for_warmup():
     return True
 
 
-def get_db_connection():
-    """
-    Establish a connection to the PostgreSQL database.
-    """
-    print("[DB] Opening new database connection")
-    return psycopg2.connect(
-        host=DB_HOST,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD
-    )
-
-
 class PoolManager:
     """
     PoolManager class to manage the hot pool of challenges.
     """
 
-    def __init__(self, db_conn, minimal_pool_size=1, maximal_pool_size=10, check_interval_seconds=10):
+    def __init__(self, minimal_pool_size=1, maximal_pool_size=10, check_interval_seconds=10):
         print("[POOL] Initializing PoolManager")
 
         self.running_warmups = {}     # thread_id -> challenge_template_id
@@ -98,7 +79,8 @@ class PoolManager:
         self.minimal_pool_size = minimal_pool_size
         self.maximal_pool_size = maximal_pool_size
         self.check_interval_seconds = check_interval_seconds
-        self.db_conn = db_conn
+        self.pool_maintenance_db_conn = get_db_connection()
+        self.expired_challenge_teardown_db_conn = get_db_connection()
 
         print(f"[POOL] min={minimal_pool_size} max={maximal_pool_size} interval={check_interval_seconds}s")
 
@@ -160,7 +142,7 @@ class PoolManager:
         """
         print("[POOL] Checking and maintaining pool")
 
-        with self.db_conn.cursor() as cursor:
+        with self.pool_maintenance_db_conn.cursor() as cursor:
             cursor.execute("SELECT id FROM challenge_templates WHERE ready_to_launch = TRUE")
             challenge_template_ids = [row[0] for row in cursor.fetchall()]
 
@@ -169,17 +151,13 @@ class PoolManager:
         for challenge_template_id in challenge_template_ids:
             print(f"[POOL] Evaluating template {challenge_template_id}")
 
-            current_pool_size = self.get_current_pool_size(self.db_conn, challenge_template_id)
-            target_pool_size = self.get_target_pool_size(self.db_conn, challenge_template_id)
+            current_pool_size = self.get_current_pool_size(challenge_template_id)
+            target_pool_size = self.get_target_pool_size(challenge_template_id)
 
             target_pool_size = max(self.minimal_pool_size, target_pool_size)
             target_pool_size = min(self.maximal_pool_size, target_pool_size)
 
-            running_warmups_count = sum(
-                1 for ct_id in self.running_warmups.values()
-                if ct_id == challenge_template_id
-            )
-
+            running_warmups_count = self.get_current_provisioning_for_pool_count(challenge_template_id)
             total_effective_pool_size = current_pool_size + running_warmups_count
 
             print(
@@ -204,7 +182,7 @@ class PoolManager:
                 teardowns_needed = current_pool_size - target_pool_size
                 print(f"[POOL] Scheduling {teardowns_needed} teardowns")
 
-                with self.db_conn.cursor() as cursor:
+                with self.pool_maintenance_db_conn.cursor() as cursor:
                     cursor.execute("""
                         WITH candidates AS (
                             SELECT id
@@ -237,17 +215,16 @@ class PoolManager:
         print(f"[TEARDOWN][START] thread={thread_id} instance={challenge_instance_id}")
 
         self.running_teardowns[thread_id] = challenge_template_id
-        db_conn = get_db_connection()
 
         try:
-            teardown_challenge_backend(challenge_instance_id, db_conn)
+            teardown_challenge_backend(challenge_instance_id)
             print(f"[TEARDOWN][DONE] instance={challenge_instance_id}")
         except Exception:
             print(f"[TEARDOWN][ERROR] instance={challenge_instance_id}")
             traceback.print_exc()
         finally:
             self.running_teardowns.pop(thread_id, None)
-            db_conn.close()
+
             print(f"[TEARDOWN][CLEANUP] thread={thread_id}")
 
     def managed_warmup(self, challenge_template_id):
@@ -255,13 +232,11 @@ class PoolManager:
         print(f"[WARMUP][START] thread={thread_id} template={challenge_template_id}")
 
         self.running_warmups[thread_id] = challenge_template_id
-        db_conn = get_db_connection()
 
         try:
-            warmup_challenge(
+            warmup_challenge_backend(
                 None,
                 challenge_template_id,
-                db_conn,
                 MONITORING_VPN_INTERFACE,
                 MONITORING_DMZ_INTERFACE
             )
@@ -271,11 +246,24 @@ class PoolManager:
             traceback.print_exc()
         finally:
             self.running_warmups.pop(thread_id, None)
-            db_conn.close()
             print(f"[WARMUP][CLEANUP] thread={thread_id}")
 
-    def get_current_pool_size(self, db_conn, challenge_template_id):
-        with db_conn.cursor() as cursor:
+    def get_current_provisioning_for_pool_count(self, challenge_template_id):
+        with self.pool_maintenance_db_conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM challenges
+                WHERE challenge_template_id = %s
+                AND lifecycle_state = 'PROVISIONING'
+                AND pre_assigned_user_id IS NULL
+            """, (challenge_template_id,))
+            count = cursor.fetchone()[0]
+
+        print(f"[POOL] Current provisioning count for {challenge_template_id}: {count}")
+        return count
+
+    def get_current_pool_size(self, challenge_template_id):
+        with self.pool_maintenance_db_conn.cursor() as cursor:
             cursor.execute("""
                 SELECT COUNT(*)
                 FROM challenges
@@ -288,11 +276,11 @@ class PoolManager:
         print(f"[POOL] Current pool size for {challenge_template_id}: {size}")
         return size
 
-    def get_target_pool_size(self, db_conn, challenge_template_id):
+    def get_target_pool_size(self, challenge_template_id):
         current_time = datetime.datetime.now()
         print(f"[POOL] Calculating target pool size for {challenge_template_id} at {current_time}")
 
-        with db_conn.cursor() as cursor:
+        with self.pool_maintenance_db_conn.cursor() as cursor:
             cursor.execute("""
                 SELECT effective_time, size
                 FROM pool_sizes
@@ -312,6 +300,9 @@ class PoolManager:
                 LIMIT 1
             """, (challenge_template_id, current_time))
             past = cursor.fetchone()
+
+        print(f"[POOL] Future pool size rule: {future}", flush=True)
+        print(f"[POOL] Past pool size rule: {past}", flush=True)
 
         if not past and not future:
             print("[POOL] No pool size rules found")
@@ -338,7 +329,9 @@ class PoolManager:
     def cleanup_leftover_from_crashed_processes(self):
         print("[CLEANUP] Checking for orphaned challenges")
 
-        with self.db_conn.cursor() as cursor:
+        cleanup_db_conn = get_db_connection()
+        ids = []
+        with cleanup_db_conn.cursor() as cursor:
             cursor.execute("""
                 UPDATE challenges
                 SET lifecycle_state = 'TERMINATING'
@@ -351,21 +344,26 @@ class PoolManager:
 
         for cid in ids:
             print(f"[CLEANUP] Scheduling teardown for orphaned instance {cid}")
-            db_conn = get_db_connection()
             threading.Thread(
                 target=teardown_challenge_backend,
-                args=(cid, db_conn),
+                args=(cid,),
                 daemon=True
             ).start()
 
     def teardown_expired_challenges(self):
         print("[EXPIRED] Checking for expired challenges")
 
-        with self.db_conn.cursor() as cursor:
+        with self.expired_challenge_teardown_db_conn.cursor() as cursor:
             cursor.execute("""
+                WITH expired AS (
+                    SELECT id
+                    FROM challenges
+                    WHERE lifecycle_state = 'EXPIRED'
+                    FOR UPDATE SKIP LOCKED
+                )
                 UPDATE challenges
                 SET lifecycle_state = 'TERMINATING'
-                WHERE lifecycle_state = 'EXPIRED'
+                WHERE id IN (SELECT id FROM expired)
                 RETURNING id
             """)
             ids = [row[0] for row in cursor.fetchall()]
@@ -374,10 +372,9 @@ class PoolManager:
 
         for cid in ids:
             print(f"[EXPIRED] Scheduling teardown for {cid}")
-            db_conn = get_db_connection()
             threading.Thread(
                 target=teardown_challenge_backend,
-                args=(cid, db_conn),
+                args=(cid,),
                 daemon=True
             ).start()
 
@@ -389,8 +386,7 @@ if __name__ == "__main__":
 
     print("[MAIN] Monitoring machine ready, starting PoolManager")
 
-    db_conn = get_db_connection()
-    pool_manager = PoolManager(db_conn)
+    pool_manager = PoolManager()
     pool_manager.start()
 
     print("[MAIN] PoolManager started, entering idle loop")

@@ -19,7 +19,7 @@ def cleanup_remaining_challenges():
 
     user_ids = fetch_user_ids(db_conn)
 
-    stop_running_challenges(db_conn, user_ids)
+    stop_running_challenges(user_ids)
 
 
 def wait_for_db_connection():
@@ -56,12 +56,12 @@ def fetch_user_ids(db_conn):
     return user_ids
 
 
-def stop_running_challenges(db_conn, user_ids):
+def stop_running_challenges( user_ids):
     """
     Stop all running challenges for the specified user IDs.
     """
     for user_id in user_ids:
-        stop_challenge(user_id, db_conn)
+        stop_challenge(user_id)
 
 
 if __name__ == "__main__":

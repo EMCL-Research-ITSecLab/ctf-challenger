@@ -49,7 +49,7 @@ def test_backend_challenge_handling():
                 vpn_ip = result[0]
 
             # Launch the challenge
-            launch_challenge(challenge_template.id, creator_id, db_conn)
+            launch_challenge(challenge_template.id, creator_id)
 
             time.sleep(10)  # Wait for the challenge to be launched
 
@@ -269,7 +269,7 @@ def test_backend_challenge_handling():
             try:
                 print("\tTesting challenge stop")
                 # Stop the challenge
-                stop_challenge(creator_id, db_conn)
+                stop_challenge(creator_id)
 
                 with db_conn.cursor() as cursor:
                     cursor.execute("SELECT running_challenge FROM users WHERE id = %s", (creator_id,))

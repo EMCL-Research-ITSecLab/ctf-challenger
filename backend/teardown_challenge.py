@@ -7,6 +7,7 @@ import requests
 import urllib3
 from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv, find_dotenv
+from get_db_connection import get_db_connection
 
 load_dotenv(find_dotenv())
 
@@ -23,52 +24,32 @@ WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 DNSMASQ_INSTANCES_DIR = "/etc/dnsmasq-instances"
 
 
-def teardown_challenge(challenge_id, db_conn):
+def teardown_challenge(challenge_id):
     """
     Stop a challenge for a user.
     """
 
-    with db_conn:
-        challenge, user_id, user_vpn_ip = fetch_challenge(challenge_id, db_conn)
+    try:
+        db_conn = get_db_connection()
 
+        challenge = fetch_challenge(challenge_id, db_conn)
         fetch_machines(challenge, db_conn)
-
         stop_machines(challenge)
-
         delete_machines(challenge)
-
         fetch_networks(challenge, db_conn)
-
         delete_network_devices(challenge)
-
-        if user_id is not None:
-            delete_iptables_rules(challenge, user_vpn_ip)
-
         stop_dnsmasq_instances(challenge)
-
         remove_challenge_from_wazuh(challenge)
+        remove_database_entries(challenge, db_conn)
 
-        if user_id is not None:
-            remove_database_entries(challenge, user_id, db_conn)
+    finally:
+        db_conn.close()
 
 
 def fetch_challenge(challenge_id, db_conn):
     """
     Fetch the challenge for a user.
     """
-
-    with db_conn.cursor() as cursor:
-        cursor.execute("""
-            SELECT u.id, u.vpn_static_ip
-            FROM users u
-            WHERE u.running_challenge = %s
-        """, (challenge_id,))
-
-        result = cursor.fetchone()
-        if result:
-            user_id, vpn_static_ip = result
-        else:
-            user_id, vpn_static_ip = None, None
 
     with db_conn.cursor() as cursor:
         cursor.execute("""
@@ -80,9 +61,8 @@ def fetch_challenge(challenge_id, db_conn):
             )
             UPDATE challenges
             SET lifecycle_state = 'TERMINATING'
-            FROM challenge_info
-            WHERE challenges.id = challenge_info.id
-            RETURNING challenge_info.id, challenge_info.challenge_template_id, challenge_info.subnet            
+            WHERE id IN (SELECT id FROM challenge_info)
+            RETURNING id, challenge_template_id, subnet    
         """, (challenge_id,))
 
         challenge_id, template_id, subnet = cursor.fetchone()
@@ -91,7 +71,7 @@ def fetch_challenge(challenge_id, db_conn):
     challenge_subnet = ChallengeSubnet(subnet)
     challenge = Challenge(challenge_id, challenge_template, challenge_subnet.subnet)
 
-    return challenge, user_id, vpn_static_ip
+    return challenge
 
 
 def fetch_machines(challenge, db_conn):
@@ -299,7 +279,7 @@ def wait_for_network_devices_deletion(challenge, try_timeout=3, max_tries=10):
         raise Exception(f"Not all network devices could be deleted. Existing devices: {', '.join(str(n.host_device) for n in challenge.networks.values() if network_device_exists_api_call(n))}.")
 
 
-def delete_iptables_rules(challenge, user_vpn_ip):
+def delete_iptables_rules(challenge):
     """
     Remove iptables rules previously added for the given user VPN IP.
     """
@@ -321,18 +301,6 @@ def delete_iptables_rules(challenge, user_vpn_ip):
         # Disallow traffic to the router IP
         subprocess.run(["iptables", "-D", "INPUT", "-d", network.router_ip, "-j", "DROP"], check=False,
                        capture_output=True)
-
-        if network.accessible:
-            for network_connection in network.connections.values():
-                # Allow traffic from the user VPN IP to the client IP
-                subprocess.run(
-                    ["iptables", "-D", "FORWARD", "-i", "tun0", "-o", network.host_device, "-s", user_vpn_ip, "-d",
-                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
-                     "ACCEPT"], check=False, capture_output=True)
-                subprocess.run(
-                    ["iptables", "-D", "FORWARD", "-i", network.host_device, "-o", "tun0", "-d", user_vpn_ip, "-s",
-                     network_connection.client_ip, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-j",
-                     "ACCEPT"], check=False, capture_output=True)
 
         if network.is_dmz:
             # Allow traffic from the DMZ to the outside
@@ -396,7 +364,7 @@ def remove_challenge_from_wazuh(challenge):
         except requests.RequestException:
             pass
 
-def remove_database_entries(challenge, user_id, db_conn):
+def remove_database_entries(challenge, db_conn):
     """
     Remove the database entries for a challenge.
     """
@@ -409,9 +377,6 @@ def remove_database_entries(challenge, user_id, db_conn):
 
         for network in challenge.networks.values():
             cursor.execute("DELETE FROM networks WHERE id = %s", (network.id,))
-
-        if user_id is not None:
-            cursor.execute("UPDATE users SET running_challenge = NULL WHERE id = %s", (user_id,))
 
         cursor.execute("DELETE FROM challenges WHERE id = %s", (challenge.id,))
 

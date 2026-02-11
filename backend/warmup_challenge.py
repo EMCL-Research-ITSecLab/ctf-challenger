@@ -231,16 +231,36 @@ def vmid_to_ipv6(vmid, offset=0x1000):
 
 def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101"):
     """
-    Configure Wazuh for all machines in a challenge via QEMU Guest Agent
+    Configure Wazuh for all machines in parallel.
+    Creates one thread per machine, starts all simultaneously, then joins.
     """
 
-    # Configure Wazuh on all machines
-    for machine in challenge.machines.values():
+    threads = []
+    exceptions = []
+
+    def worker(machine):
         try:
             configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip)
         except Exception as e:
             print(f"[Error] Failed to configure Wazuh for VM {machine.id}: {e}", flush=True)
-            raise
+            exceptions.append(e)
+
+    # Create one thread per machine
+    for machine in challenge.machines.values():
+        thread = threading.Thread(target=worker, args=(machine,))
+        threads.append(thread)
+
+    # Start all threads simultaneously
+    for thread in threads:
+        thread.start()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+
+    # If any thread failed, raise the first exception
+    if exceptions:
+        raise exceptions[0]
 
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
@@ -267,75 +287,52 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
 
 def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a:1::101"):
     """
-    Configure IPv6 on vrtmon interface and Wazuh agent via QEMU Guest Agent
+    Configure IPv6 and Wazuh agent via QEMU Guest Agent
+    All Wazuh-related commands are batched into a single execution.
     """
     ipv6 = vmid_to_ipv6(machine.id)
     vrtmon_gw = "fd12:3456:789a:1::1"
     agent_name = f"Agent_{machine.id}"
 
-    network_setup_start_time = time.time()
-    # Step 1: Configure IPv6
-    cmd = f"""iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
+    full_start_time = time.time()
+
+    # Single aggregated command using &&
+    aggregated_cmd = f"""
+    iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
     ip -6 addr add {ipv6}/64 dev $iface && \
-    ip -6 route add default via {vrtmon_gw}"""
+    ip -6 route add default via {vrtmon_gw} && \
+    systemctl stop wazuh-agent 2>/dev/null || true && \
+    /var/monitoring/wazuh-agent/setup_wazuh.sh \
+        --register \
+        --manager={manager_ip} \
+        --name={agent_name} \
+        --password={WAZUH_ENROLLMENT_PASSWORD} \
+        --yes && \
+    systemctl daemon-reload && \
+    systemctl enable wazuh-agent && \
+    systemctl start wazuh-agent && \
+    rm -rf /var/monitoring
+    """
 
-    subprocess.run(f"qm guest exec {machine.id} -- bash -c '{cmd}'", shell=True, capture_output=True, text=True)
-    launch_timing_logger(network_setup_start_time, "[WAZUH IPv6 CONFIGURED]", machine.challenge.template.id, None, VM_ID=machine.id)
-
-    stop_running_agent_start_time = time.time()
-    # Step 2: Stop Wazuh agent if running
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "stop", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # Ignore errors
-    launch_timing_logger(stop_running_agent_start_time, "[WAZUH AGENT STOPPED]", machine.challenge.template.id, None, VM_ID=machine.id)
-
-    register_start_time = time.time()
-    # Step 3: Register agent with manager
     cmd = [
-        "qm", "guest", "exec", str(machine.id), "--",
-        "/var/monitoring/wazuh-agent/setup_wazuh.sh",
-        "--register",
-        f"--manager={manager_ip}",
-        f"--name={agent_name}",
-        f"--password={WAZUH_ENROLLMENT_PASSWORD}",
-        "--yes"
+        "qm", "guest", "exec", str(machine.id),
+        "--", "bash", "-c", aggregated_cmd
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
+        raise RuntimeError(
+            f"Failed to configure Wazuh for VM {machine.id}: {result.stderr}"
+        )
 
-    launch_timing_logger(register_start_time, "[WAZUH AGENT REGISTERED]", machine.challenge.template.id, None, VM_ID=machine.id)
-
-    reload_start_time = time.time()
-    # Step 4: Start Wazuh agent
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "daemon-reload"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    launch_timing_logger(reload_start_time, "[WAZUH DAEMON RELOADED]", machine.challenge.template.id, None, VM_ID=machine.id)
-
-
-    enable_start_time = time.time()
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "enable", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    launch_timing_logger(enable_start_time, "[WAZUH AGENT ENABLED]", machine.challenge.template.id, None, VM_ID=machine.id)
-
-    start_running_agent_start_time = time.time()
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "start", "wazuh-agent"]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
-
-    launch_timing_logger(start_running_agent_start_time, "[WAZUH AGENT STARTED]", machine.challenge.template.id, None,
-                         VM_ID=machine.id)
-
-
-    cleanup_start_time = time.time()
-    # Step 5: Clean up monitoring directory
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "rm", "-rf", "/var/monitoring"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    launch_timing_logger(cleanup_start_time, "[WAZUH CLEANUP COMPLETE]", machine.challenge.template.id, None, VM_ID=machine.id)
+    launch_timing_logger(
+        full_start_time,
+        "[WAZUH FULL CONFIG COMPLETE]",
+        machine.challenge.template.id,
+        None,
+        VM_ID=machine.id
+    )
 
 
 def generate_mac_address(machine_id, local_network_id, local_connection_id):

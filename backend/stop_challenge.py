@@ -7,6 +7,7 @@ import requests
 import urllib3
 from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv, find_dotenv
+from get_db_connection import get_db_connection
 
 load_dotenv(find_dotenv())
 
@@ -16,15 +17,21 @@ CHALLENGES_ROOT_SUBNET_MASK_INT = sum(bin(int(x)).count('1') for x in CHALLENGES
 CHALLENGES_ROOT_SUBNET_CIDR = f"{CHALLENGES_ROOT_SUBNET}/{CHALLENGES_ROOT_SUBNET_MASK_INT}"
 
 
-def stop_challenge(user_id, db_conn):
+def stop_challenge(user_id):
     """
     Stop a challenge for a user.
     """
 
-    with db_conn:
+    try:
+        db_conn = get_db_connection()
+
         user_static_ip, challenge_id = get_user_static_ip_and_challenge_id(user_id, db_conn)
-        block_user_access_to_vm_subnet(user_static_ip)
+        remove_user_iptables_rules(user_static_ip)
         mark_challenge_expired(challenge_id, db_conn)
+        unassign_challenge_from_user(user_id, db_conn)
+
+    finally:
+        db_conn.close()
 
 
 def get_user_static_ip_and_challenge_id(user_id, db_conn):
@@ -57,17 +64,30 @@ def mark_challenge_expired(challenge_id, db_conn):
         """, (challenge_id,))
 
 
-def block_user_access_to_vm_subnet(user_static_ip):
+def remove_user_iptables_rules(user_static_ip):
     """
-    Block user access to the VM subnet by updating firewall rules.
+    Remove all iptables rules that contain the user's static IP.
     """
+    # Get all iptables rules
+    result = subprocess.run(["sudo", "iptables", "-S"], capture_output=True, text=True)
+    rules = result.stdout.splitlines()
 
-    # Block traffic from user IP to VM subnet
-    subprocess.run([
-        "iptables", "-P", "FORWARD", "-s", user_static_ip, "-d", CHALLENGES_ROOT_SUBNET_CIDR, "-j", "DROP"
-    ], check=False, capture_output=True)
+    # Filter rules that contain the user's static IP
+    rules_to_remove = [rule for rule in rules if user_static_ip in rule]
 
-    # Block traffic from VM subnet to user IP
-    subprocess.run([
-        "iptables", "-P", "FORWARD", "-s", CHALLENGES_ROOT_SUBNET_CIDR, "-d", user_static_ip, "-j", "DROP"
-    ], check=False, capture_output=True)
+    # Remove each rule
+    for rule in rules_to_remove:
+        delete_rule = rule.replace("-A", "-D")  # Change -A to -D to delete the rule
+        subprocess.run(["sudo", "iptables"] + delete_rule.split(), check=True, capture_output=True)
+
+
+def unassign_challenge_from_user(user_id, db_conn):
+    """
+    Unassign the challenge from the user in the database.
+    """
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+            UPDATE users
+            SET running_challenge = NULL
+            WHERE id = %s
+        """, (user_id,))

@@ -8,6 +8,7 @@ import urllib3
 from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv, find_dotenv
 from get_db_connection import get_db_connection
+import random
 
 load_dotenv(find_dotenv())
 
@@ -230,15 +231,21 @@ def delete_machines(challenge):
             existing_machines[machine.id] = machine
 
     for machine in existing_machines.values():
-        try:
-            out = subprocess.run(["qm", "destroy", str(machine.id), "--skiplock"], check=True, capture_output=True)
-        except Exception as e:
-            print(f"[Warning] Failed to destroy VM {machine.id}: {e}", flush=True)
+        max_retries = 5
+        retries = 0
+        while retries < max_retries:
             try:
-                print(out.stdout.decode(), flush=True)
-                print(out.stderr.decode(), flush=True)
-            except Exception:
-                pass
+                out = subprocess.run(["qm", "destroy", str(machine.id), "--skiplock"], check=True, capture_output=True)
+            except Exception as e:
+                print(f"[Warning] Failed to destroy VM {machine.id}: {e}", flush=True)
+                try:
+                    print(out.stdout.decode(), flush=True)
+                    print(out.stderr.decode(), flush=True)
+                except Exception:
+                    pass
+
+            time.sleep(random.randint(1, 10) // 10.)
+            retries += 1
 
 
 def delete_network_devices(challenge):

@@ -13,3 +13,7 @@ automatic_challenge_import/ubuntu-cloudimg.yaml
 automatic_challenge_import/dc1.yaml
 tests/performance/utils/**.pem
 tests/security
+database/migrate_functions.sql
+setup/certs/
+setup/suricata-8.0.0.tar.gz
+setup/suricata-8.0.0/

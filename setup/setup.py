@@ -1591,6 +1591,19 @@ WantedBy=multi-user.target
     subprocess.run(["systemctl", "enable", "cleanup"], check=True, capture_output=True)
 
 
+def setup_pool_size_prediction_cron_job():
+    """
+    Setup the pool size prediction cron job to run every day at 5:30 AM.
+    """
+
+    print("\tSetting up pool size prediction cron job")
+    cron_job = f"30 5 * * * root /usr/bin/python3 {BACKEND_FILES_DIR}/pool_size_prediction.py >> /var/log/pool_size_prediction.log 2>&1\n"
+    with open("/etc/cron.d/pool_size_prediction", "w") as cron_file:
+        cron_file.write(cron_job)
+    subprocess.run(["chmod", "644", "/etc/cron.d/pool_size_prediction"], check=True, capture_output=True)
+    subprocess.run(["chown", "root:root", "/etc/cron.d/pool_size_prediction"], check=True, capture_output=True)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 2:
         if sys.argv[2] == "-h" or sys.argv[2] == "--help":

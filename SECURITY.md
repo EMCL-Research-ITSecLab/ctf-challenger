@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines how security issues affecting `heiFIP` must be
+This document defines how security issues affecting `heiST` must be
 reported, handled, remediated, and disclosed. The goal is to ensure that
 security-relevant findings are managed confidentially, triaged consistently,
 and resolved within appropriate operational timelines.

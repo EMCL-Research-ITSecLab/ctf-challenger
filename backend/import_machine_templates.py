@@ -23,6 +23,8 @@ def import_machine_templates(challenge_template_id, db_conn, ip_pool):
         configure_vms(challenge_template, ip_pool)
 
         convert_machine_template_vms_to_templates(challenge_template)
+
+        mark_challenge_template_as_ready(challenge_template, db_conn)
     except Exception as e:
         undo_import_machine_templates(challenge_template)
         raise RuntimeError(f"Failed to import disk images: {e}")
@@ -362,6 +364,15 @@ def convert_machine_template_vms_to_templates(challenge_template):
             convert_vm_to_template_api_call(machine_template.id)
         except Exception as e:
             raise RuntimeError(f"Failed to convert VM to template: {e}")
+
+
+def mark_challenge_template_as_ready(challenge_template, db_conn):
+    """
+    Mark the challenge template as ready in the database.
+    """
+    with db_conn.cursor() as cursor:
+        cursor.execute("UPDATE challenge_templates SET ready_to_launch = TRUE WHERE id = %s", (challenge_template.id,))
+        db_conn.commit()
 
 
 def undo_import_machine_templates(challenge_template):

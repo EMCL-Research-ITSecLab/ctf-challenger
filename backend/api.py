@@ -72,63 +72,44 @@ def before_request():
 @app.route('/launch-challenge', methods=['POST'])
 def launch_challenge():
     try:
-        db_conn = get_db_connection()
-
-        try:
-            data = request.json
-            challenge_template_id = data['challenge_template_id']
-            user_id = data['user_id']
-            _ = int(challenge_template_id)
-            _ = int(user_id)
-        except Exception as e:
-            print("Invalid input data", e, flush=True)
-            return {"error": "Invalid input data", "success": False}, 500
-
-        try:
-            accessible_networks = launch_challenge_backend(challenge_template_id, user_id, db_conn, MONITORING_VPN_INTERFACE, MONITORING_DMZ_INTERFACE)
-        except Exception as e:
-            print("Error launching challenge", e, flush=True)
-            return {"error": str(e), "success": False}, 500
-
-        return {"message": "Challenge launched", "success": True, "entrypoints": accessible_networks}, 200
-
+        data = request.json
+        challenge_template_id = data['challenge_template_id']
+        user_id = data['user_id']
+        _ = int(challenge_template_id)
+        _ = int(user_id)
     except Exception as e:
-        print("Database connection error", e, flush=True)
-        return {"error": "Database connection error", "success": False}, 500
+        print("Invalid input data", e, flush=True)
+        return {"error": "Invalid input data", "success": False}, 500
 
-    finally:
-        if 'db_conn' in locals():
-            db_conn.close()
+    try:
+        print(f"Launching challenge for user ID {user_id} with template ID {challenge_template_id}", flush=True)
+        accessible_networks = launch_challenge_backend(challenge_template_id, user_id, MONITORING_VPN_INTERFACE, MONITORING_DMZ_INTERFACE)
+    except Exception as e:
+        print("Error launching challenge", e, flush=True)
+        return {"error": str(e), "success": False}, 500
+
+    return {"message": "Challenge launched", "success": True, "entrypoints": accessible_networks}, 200
+
+
 
 
 @app.route('/stop-challenge', methods=['POST'])
 def stop_challenge():
     try:
-        db_conn = get_db_connection()
-
-        try:
-            data = request.json
-            user_id = data['user_id']
-            _ = int(user_id)
-        except Exception as e:
-            print("Invalid input data", e, flush=True)
-            return {"error": "Invalid input data", "success": False}, 500
-
-        try:
-            stop_challenge_backend(user_id, db_conn)
-        except Exception as e:
-            print("Error stopping challenge", e, flush=True)
-            return {"error": str(e), "success": False}, 500
-
-        return {"message": "Challenge stopped", "success": True}, 200
-
+        data = request.json
+        user_id = data['user_id']
+        _ = int(user_id)
     except Exception as e:
-        print("Database connection error", e, flush=True)
-        return {"error": "Database connection error", "success": False}, 500
+        print("Invalid input data", e, flush=True)
+        return {"error": "Invalid input data", "success": False}, 500
 
-    finally:
-        if 'db_conn' in locals():
-            db_conn.close()
+    try:
+        stop_challenge_backend(user_id)
+    except Exception as e:
+        print("Error stopping challenge", e, flush=True)
+        return {"error": str(e), "success": False}, 500
+
+    return {"message": "Challenge stopped", "success": True}, 200
 
 
 @app.route('/import-machine-templates', methods=['POST'])

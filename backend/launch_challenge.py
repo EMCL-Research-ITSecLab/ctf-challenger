@@ -14,7 +14,7 @@ from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
 from launch_timing_logger import launch_timing_logger
-from get_db_connection import get_db_connection
+from get_db_connection import run_with_db_connection
 
 load_dotenv(find_dotenv())
 
@@ -31,17 +31,18 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 challenge_launch_lock_dir = "/var/lock/challenge_launch_locks/"
 os.makedirs(challenge_launch_lock_dir, exist_ok=True)
 
-def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_monitoring_device):
+@run_with_db_connection
+def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_monitoring_device, db_conn=None):
     """
     Launch a challenge by creating a user and network device.
     """
 
-    launch_lock = acquire_exclusive_launch_lock(user_id)
+
 
     try:
+        launch_lock = acquire_exclusive_launch_lock(user_id)
         start_time = time.time()
 
-        db_conn = get_db_connection()
         try:
             start_time_db_fetch = time.time()
             print(f"[Info] DB fetch started for user {user_id} and challenge template {challenge_template_id}", flush=True)
@@ -121,10 +122,7 @@ def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_
 
         launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, user_id)
 
-    except Exception as e:
-        raise e
     finally:
-        db_conn.close()
         release_exclusive_launch_lock(user_id, launch_lock)
 
     return accessible_networks

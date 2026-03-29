@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import psycopg2
 import os
+import functools
 
 load_dotenv()
 
@@ -25,3 +26,17 @@ def get_db_connection():
     )
     db_conn.autocommit = True
     return db_conn
+
+
+def run_with_db_connection(func):
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            db_conn = get_db_connection()
+
+            return func(*args, **kwargs, db_conn=db_conn)
+        finally:
+            db_conn.close()
+
+    return wrapper

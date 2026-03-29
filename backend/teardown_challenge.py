@@ -7,7 +7,7 @@ import requests
 import urllib3
 from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv, find_dotenv
-from get_db_connection import get_db_connection
+from get_db_connection import run_with_db_connection
 import random
 
 load_dotenv(find_dotenv())
@@ -24,27 +24,22 @@ WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 
 DNSMASQ_INSTANCES_DIR = "/etc/dnsmasq-instances"
 
-
-def teardown_challenge(challenge_id):
+@run_with_db_connection
+def teardown_challenge(challenge_id, db_conn=None):
     """
     Stop a challenge for a user.
     """
 
-    try:
-        db_conn = get_db_connection()
+    challenge = fetch_challenge(challenge_id, db_conn)
+    fetch_machines(challenge, db_conn)
+    stop_machines(challenge)
+    delete_machines(challenge)
+    fetch_networks(challenge, db_conn)
+    delete_network_devices(challenge)
+    stop_dnsmasq_instances(challenge)
+    remove_challenge_from_wazuh(challenge)
+    remove_database_entries(challenge, db_conn)
 
-        challenge = fetch_challenge(challenge_id, db_conn)
-        fetch_machines(challenge, db_conn)
-        stop_machines(challenge)
-        delete_machines(challenge)
-        fetch_networks(challenge, db_conn)
-        delete_network_devices(challenge)
-        stop_dnsmasq_instances(challenge)
-        remove_challenge_from_wazuh(challenge)
-        remove_database_entries(challenge, db_conn)
-
-    finally:
-        db_conn.close()
 
 
 def fetch_challenge(challenge_id, db_conn):

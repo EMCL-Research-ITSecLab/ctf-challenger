@@ -14,7 +14,7 @@ from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
 from launch_timing_logger import launch_timing_logger
-from get_db_connection import run_with_db_connection
+from get_db_connection import db_connection_context
 
 load_dotenv(find_dotenv())
 
@@ -26,64 +26,64 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 
 @retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
        reraise=True)
-@run_with_db_connection
-def warmup_challenge(pre_assigned_user_id, challenge_template_id, vpn_monitoring_device, dmz_monitoring_device, db_conn=None):
+def warmup_challenge(pre_assigned_user_id, challenge_template_id, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
 
-    start_time = time.time()
+    with db_connection_context() as db_conn:
+        start_time = time.time()
 
-    try:
-        start_time_db_fetch = time.time()
-        challenge_template = ChallengeTemplate(challenge_template_id)
-        fetch_machines(challenge_template, db_conn)
-        fetch_network_and_connection_templates(challenge_template, db_conn)
-        fetch_domain_templates(challenge_template, db_conn)
+        try:
+            start_time_db_fetch = time.time()
+            challenge_template = ChallengeTemplate(challenge_template_id)
+            fetch_machines(challenge_template, db_conn)
+            fetch_network_and_connection_templates(challenge_template, db_conn)
+            fetch_domain_templates(challenge_template, db_conn)
 
-        launch_timing_logger(start_time_db_fetch, "[WARMUP DB FETCH COMPLETE]", challenge_template_id, pre_assigned_user_id)
-    except Exception as e:
-        raise ValueError(f"Error fetching from database: {e}")
+            launch_timing_logger(start_time_db_fetch, "[WARMUP DB FETCH COMPLETE]", challenge_template_id, pre_assigned_user_id)
+        except Exception as e:
+            raise ValueError(f"Error fetching from database: {e}")
 
-    try:
-        challenge = create_challenge(challenge_template, db_conn, pre_assigned_user_id)
-    except Exception as e:
-        raise ValueError(f"Error creating challenge: {e}")
+        try:
+            challenge = create_challenge(challenge_template, db_conn, pre_assigned_user_id)
+        except Exception as e:
+            raise ValueError(f"Error creating challenge: {e}")
 
-    try:
-        start_time_machine_clone = time.time()
-        clone_machines(challenge_template, challenge, db_conn)
-        launch_timing_logger(start_time_machine_clone, "[WARMUP MACHINE CLONE COMPLETE]", challenge_template_id, pre_assigned_user_id)
+        try:
+            start_time_machine_clone = time.time()
+            clone_machines(challenge_template, challenge, db_conn)
+            launch_timing_logger(start_time_machine_clone, "[WARMUP MACHINE CLONE COMPLETE]", challenge_template_id, pre_assigned_user_id)
 
-        # Network setup
-        start_time_network = time.time()
-        attach_vrtmon_network(challenge)
-        create_networks_and_connections(challenge_template, challenge, db_conn)
-        create_domains(challenge_template, challenge, db_conn)
-        create_network_devices(challenge)
-        wait_for_networks_to_be_up(challenge)
+            # Network setup
+            start_time_network = time.time()
+            attach_vrtmon_network(challenge)
+            create_networks_and_connections(challenge_template, challenge, db_conn)
+            create_domains(challenge_template, challenge, db_conn)
+            create_network_devices(challenge)
+            wait_for_networks_to_be_up(challenge)
 
-        attach_networks_to_vms(challenge)
-        configure_dnsmasq_instances(challenge)
-        launch_timing_logger(start_time_network, "[WARMUP NETWORK SETUP COMPLETE]", challenge_template_id, pre_assigned_user_id)
+            attach_networks_to_vms(challenge)
+            configure_dnsmasq_instances(challenge)
+            launch_timing_logger(start_time_network, "[WARMUP NETWORK SETUP COMPLETE]", challenge_template_id, pre_assigned_user_id)
 
-        start_time_vm_boot = time.time()
-        launch_machines(challenge)
-        launch_timing_logger(start_time_vm_boot, "[WARMUP VM BOOT COMPLETE]", challenge_template_id, pre_assigned_user_id)
+            start_time_vm_boot = time.time()
+            launch_machines(challenge)
+            launch_timing_logger(start_time_vm_boot, "[WARMUP VM BOOT COMPLETE]", challenge_template_id, pre_assigned_user_id)
 
-        start_time_wazuh = time.time()
-        configure_wazuh_for_challenge(challenge)
-        launch_timing_logger(start_time_wazuh, "[WARMUP WAZUH CONFIG COMPLETE]", challenge_template_id, pre_assigned_user_id)
+            start_time_wazuh = time.time()
+            configure_wazuh_for_challenge(challenge)
+            launch_timing_logger(start_time_wazuh, "[WARMUP WAZUH CONFIG COMPLETE]", challenge_template_id, pre_assigned_user_id)
 
-        set_challenge_ready(challenge, db_conn)
+            set_challenge_ready(challenge, db_conn)
 
-    except Exception as e:
-        undo_launch_challenge(challenge, db_conn)
-        raise ValueError(f"Error launching challenge: {e}")
+        except Exception as e:
+            undo_launch_challenge(challenge, db_conn)
+            raise ValueError(f"Error launching challenge: {e}")
 
-    launch_timing_logger(start_time, "[WARMUP COMPLETE]", challenge_template_id, pre_assigned_user_id)
+        launch_timing_logger(start_time, "[WARMUP COMPLETE]", challenge_template_id, pre_assigned_user_id)
 
-    return challenge
+        return challenge
 
 
 def fetch_machines(challenge_template, db_conn):

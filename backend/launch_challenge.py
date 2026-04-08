@@ -14,7 +14,7 @@ from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
 from launch_timing_logger import launch_timing_logger
-from get_db_connection import run_with_db_connection
+from get_db_connection import db_connection_context
 
 load_dotenv(find_dotenv())
 
@@ -31,101 +31,102 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 challenge_launch_lock_dir = "/var/lock/challenge_launch_locks/"
 os.makedirs(challenge_launch_lock_dir, exist_ok=True)
 
-@run_with_db_connection
-def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_monitoring_device, db_conn=None):
+def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
 
 
 
-    try:
-        launch_lock = acquire_exclusive_launch_lock(user_id)
-        start_time = time.time()
-
+    with db_connection_context() as db_conn:
+        launch_lock = None
         try:
-            start_time_db_fetch = time.time()
-            print(f"[Info] DB fetch started for user {user_id} and challenge template {challenge_template_id}", flush=True)
-            user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
-            user_email = fetch_user_email(user_id, db_conn)
-            challenge_template = ChallengeTemplate(challenge_template_id)
-            fetch_challenge_flags(challenge_template, db_conn)
+            launch_lock = acquire_exclusive_launch_lock(user_id)
+            start_time = time.time()
 
-            launch_timing_logger(start_time_db_fetch, "[DB FETCH COMPLETE]", challenge_template_id, user_id)
-        except Exception as e:
-            raise ValueError(f"Error fetching from database: {e}")
-
-        try:
-            print(f"[Info] Attempting to get ready challenge for template {challenge_template_id} and user {user_id}", flush=True)
-            challenge = get_ready_challenge(challenge_template, db_conn)
-            if challenge is None:
-                running_warmup_challenge_id = try_attach_to_running_warmup(challenge_template_id, user_id, db_conn)
-                if running_warmup_challenge_id is not None:
-                    print(f"[Info] Attached to running warmup challenge {running_warmup_challenge_id} for template {challenge_template_id} and user {user_id}", flush=True)
-
-                    while challenge is None:
-                        running_warmup_challenge_id = check_running_warmup(challenge_template_id, user_id, db_conn)
-                        if running_warmup_challenge_id is None:
-                            break
-
-                        challenge = get_ready_challenge(challenge_template, db_conn, user_id)
-                        time.sleep(1)
-
-            if challenge is None:
-                print(f"[Info] No ready challenge found and attaching failed, creating new challenge for template {challenge_template_id} and user {user_id}", flush=True)
-                challenge = warmup_challenge(user_id, challenge_template.id, vpn_monitoring_device, dmz_monitoring_device)
-
-            print(f"[Info] Adding running challenge {challenge.id} to user {user_id}", flush=True)
-            add_running_challenge_to_user(challenge, user_id, db_conn)
-
-            print(f"[Info] Got challenge {challenge.id} for template {challenge_template_id} and user {user_id}", flush=True)
-            fetch_machines(challenge, db_conn)
-
-            print(f"[Info] Fetched machines for challenge {challenge.id}", flush=True)
-            fetch_networks_and_connections(challenge, db_conn)
-
-        except Exception as e:
-            print(f"[Error] Failed to prepare challenge for launch: {e}", flush=True)
             try:
+                start_time_db_fetch = time.time()
+                print(f"[Info] DB fetch started for user {user_id} and challenge template {challenge_template_id}", flush=True)
+                user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
+                user_email = fetch_user_email(user_id, db_conn)
+                challenge_template = ChallengeTemplate(challenge_template_id)
+                fetch_challenge_flags(challenge_template, db_conn)
+
+                launch_timing_logger(start_time_db_fetch, "[DB FETCH COMPLETE]", challenge_template_id, user_id)
+            except Exception as e:
+                raise ValueError(f"Error fetching from database: {e}")
+
+            try:
+                print(f"[Info] Attempting to get ready challenge for template {challenge_template_id} and user {user_id}", flush=True)
+                challenge = get_ready_challenge(challenge_template, db_conn)
+                if challenge is None:
+                    running_warmup_challenge_id = try_attach_to_running_warmup(challenge_template_id, user_id, db_conn)
+                    if running_warmup_challenge_id is not None:
+                        print(f"[Info] Attached to running warmup challenge {running_warmup_challenge_id} for template {challenge_template_id} and user {user_id}", flush=True)
+
+                        while challenge is None:
+                            running_warmup_challenge_id = check_running_warmup(challenge_template_id, user_id, db_conn)
+                            if running_warmup_challenge_id is None:
+                                break
+
+                            challenge = get_ready_challenge(challenge_template, db_conn, user_id)
+                            time.sleep(1)
+
+                if challenge is None:
+                    print(f"[Info] No ready challenge found and attaching failed, creating new challenge for template {challenge_template_id} and user {user_id}", flush=True)
+                    challenge = warmup_challenge(user_id, challenge_template.id, vpn_monitoring_device, dmz_monitoring_device)
+
+                print(f"[Info] Adding running challenge {challenge.id} to user {user_id}", flush=True)
+                add_running_challenge_to_user(challenge, user_id, db_conn)
+
+                print(f"[Info] Got challenge {challenge.id} for template {challenge_template_id} and user {user_id}", flush=True)
+                fetch_machines(challenge, db_conn)
+
+                print(f"[Info] Fetched machines for challenge {challenge.id}", flush=True)
+                fetch_networks_and_connections(challenge, db_conn)
+
+            except Exception as e:
+                print(f"[Error] Failed to prepare challenge for launch: {e}", flush=True)
+                try:
+                    stop_challenge(user_id)
+                except Exception as stop_e:
+                    print(f"[Error] Failed to stop challenge after error: {stop_e}", flush=True)
+
+                raise ValueError(f"Error creating challenge: {e}")
+
+            try:
+                # Network setup
+                start_time_network = time.time()
+                print(f"[Info] Starting network setup for challenge {challenge.id} and user {user_id}", flush=True)
+                start_dnsmasq_instances(challenge, user_vpn_ip)
+                launch_timing_logger(start_time_network, "[NETWORK SETUP COMPLETE]", challenge_template_id, user_id)
+
+                start_time_user_flags = time.time()
+                print(f"[Info] Starting user-specific flag processing for challenge {challenge.id} and user {user_id}", flush=True)
+                process_all_user_specific_flags(challenge, user_email)
+                launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
+
+                start_time_firewall = time.time()
+                print(f"[Info] Starting iptables rule setup for challenge {challenge.id} and user {user_id}", flush=True)
+                add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
+                launch_timing_logger(start_time_firewall, "[FIREWALL RULES COMPLETE]", challenge_template_id, user_id)
+
+                reset_expiration_timer(challenge.id, db_conn, expiration_duration_minutes=60)
+
+            except Exception as e:
                 stop_challenge(user_id)
-            except Exception as stop_e:
-                print(f"[Error] Failed to stop challenge after error: {stop_e}", flush=True)
+                raise ValueError(f"Error launching challenge: {e}")
 
-            raise ValueError(f"Error creating challenge: {e}")
+            accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
+            accessible_networks.sort()
 
-        try:
-            # Network setup
-            start_time_network = time.time()
-            print(f"[Info] Starting network setup for challenge {challenge.id} and user {user_id}", flush=True)
-            start_dnsmasq_instances(challenge, user_vpn_ip)
-            launch_timing_logger(start_time_network, "[NETWORK SETUP COMPLETE]", challenge_template_id, user_id)
+            launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, user_id)
 
-            start_time_user_flags = time.time()
-            print(f"[Info] Starting user-specific flag processing for challenge {challenge.id} and user {user_id}", flush=True)
-            process_all_user_specific_flags(challenge, user_email)
-            launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
+        finally:
+            if launch_lock is not None:
+                release_exclusive_launch_lock(user_id, launch_lock)
 
-            start_time_firewall = time.time()
-            print(f"[Info] Starting iptables rule setup for challenge {challenge.id} and user {user_id}", flush=True)
-            add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
-            launch_timing_logger(start_time_firewall, "[FIREWALL RULES COMPLETE]", challenge_template_id, user_id)
-
-            reset_expiration_timer(challenge.id, db_conn, expiration_duration_minutes=60)
-
-        except Exception as e:
-            stop_challenge(user_id)
-            raise ValueError(f"Error launching challenge: {e}")
-
-        accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
-        accessible_networks.sort()
-
-
-        launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, user_id)
-
-    finally:
-        release_exclusive_launch_lock(user_id, launch_lock)
-
-    return accessible_networks
+        return accessible_networks
 
 
 def try_attach_to_running_warmup(challenge_template_id, user_id, db_conn):

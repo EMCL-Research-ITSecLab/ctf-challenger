@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import psycopg2
 import os
-import functools
+from contextlib import contextmanager
 
 load_dotenv()
 
@@ -28,15 +28,13 @@ def get_db_connection():
     return db_conn
 
 
-def run_with_db_connection(func):
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            db_conn = get_db_connection()
-
-            return func(*args, **kwargs, db_conn=db_conn)
-        finally:
-            db_conn.close()
-
-    return wrapper
+@contextmanager
+def db_connection_context():
+    """
+    Provide a managed PostgreSQL connection and always close it.
+    """
+    db_conn = get_db_connection()
+    try:
+        yield db_conn
+    finally:
+        db_conn.close()

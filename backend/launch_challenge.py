@@ -48,6 +48,7 @@ def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_
                 start_time_db_fetch = time.time()
                 print(f"[Info] DB fetch started for user {user_id} and challenge template {challenge_template_id}", flush=True)
                 user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
+                user_email = fetch_user_email(user_id, db_conn)
                 user_unique_id = fetch_user_unique_id(user_id, db_conn)
                 challenge_template = ChallengeTemplate(challenge_template_id)
                 fetch_challenge_flags(challenge_template, db_conn)
@@ -103,7 +104,7 @@ def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_
 
                 start_time_user_flags = time.time()
                 print(f"[Info] Starting user-specific flag processing for challenge {challenge.id} and user {user_id}", flush=True)
-                process_all_user_specific_flags(challenge, user_unique_id)
+                process_all_user_specific_flags(challenge, user_email, user_unique_id)
                 launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
 
                 start_time_firewall = time.time()
@@ -416,7 +417,7 @@ def generate_user_specific_flag(flag_secret, user_unique_id):
     return f"ITSEC{{{hash_value}}}"
 
 
-def process_all_user_specific_flags(challenge, user_unique_id):
+def process_all_user_specific_flags(challenge, user_email, user_unique_id):
     """
     Process all user-specific flags for the challenge.
     Generates personalized flags and writes them to the appropriate VMs.
@@ -546,16 +547,30 @@ def fetch_user_vpn_ip(user_id, db_conn):
     return user_vpn_ip
 
 
-def fetch_user_unique_id(user_id, db_conn):
+def fetch_user_email(user_id, db_conn):
     """
     Fetch the email address for the given user ID.
+    """
+    with db_conn.cursor() as cursor:
+        cursor.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        user_email = cursor.fetchone()[0]
+
+    if user_email is None:
+        raise ValueError("User email not found")
+
+    return user_email
+
+
+def fetch_user_unique_id(user_id, db_conn):
+    """
+    Fetch the unique id for the given user ID.
     """
     with db_conn.cursor() as cursor:
         cursor.execute("SELECT unique_id FROM users WHERE id = %s", (user_id,))
         unique_id = cursor.fetchone()[0]
 
     if unique_id is None:
-        raise ValueError("User email not found")
+        raise ValueError("User unique id not found")
 
     return unique_id
 

@@ -1443,10 +1443,12 @@ def setup_database(conn=None, create_admin_config=True):
     with conn.cursor() as cursor:
         WEBSITE_ADMIN_PASSWORD_SALT = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
         WEBSITE_ADMIN_PASSWORD_HASH = hashlib.sha512((WEBSITE_ADMIN_PASSWORD_SALT + WEBSITE_ADMIN_PASSWORD).encode()).hexdigest()
+        # Timestamp timezone offset is arbitrary. It is added to mirror the postgres now()::TEXT format for consistency.
+        WEBSITE_ADMIN_UNIQUE_ID = hashlib.sha256((WEBSITE_ADMIN_USER + "admin@localhost.local" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f+00") + os.urandom(8).hex()).encode()).hexdigest()
 
         cursor.execute(
-            f"INSERT INTO users (username, email, password_hash, password_salt, is_admin) VALUES (%s, %s, %s, %s, %s)",
-            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD_HASH, WEBSITE_ADMIN_PASSWORD_SALT, True))
+            "INSERT INTO users (username, email, password_hash, password_salt, is_admin, unique_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD_HASH, WEBSITE_ADMIN_PASSWORD_SALT, True, WEBSITE_ADMIN_UNIQUE_ID))
 
     conn.commit()
 

@@ -15,6 +15,7 @@ import hashlib
 import hmac
 from launch_timing_logger import launch_timing_logger
 from get_db_connection import db_connection_context
+from qemu_ga_wrapper import GuestAgent, GuestAgentError
 
 load_dotenv(find_dotenv())
 
@@ -384,19 +385,18 @@ def vmid_to_ipv6(vmid, offset=0x1000):
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
     """
-    Wait until QEMU Guest Agent is ready
+    Wait until QEMU Guest Agent is ready.
     """
     start_time = time.time()
+    deadline = time.monotonic() + timeout
 
-    while time.time() - start_time < timeout:
+    while time.monotonic() < deadline:
         try:
-            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-
-            if result.returncode == 0:
-                launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
-                return True
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            with GuestAgent(vmid=machine.id) as ga:
+                if ga.ping():
+                    launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
+                    return True
+        except GuestAgentError:
             pass
 
         time.sleep(5)
@@ -440,9 +440,9 @@ def process_all_user_specific_flags(challenge, user_email, user_unique_id):
                         machine = m
                         break
 
-                    if machine is None:
-                        print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
-                        continue
+                if machine is None:
+                    print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
+                    continue
 
                 if machine.id not in flags_by_machine:
                     flags_by_machine[machine.id] = []
@@ -499,11 +499,16 @@ def write_user_specific_flags_to_vm(machine_id, flags):
 
     if flag_write_command != "":
         flag_write_command = flag_write_command.rstrip(" && ")
-        result = subprocess.run(["qm", "guest", "exec", str(machine_id), "--",
-                    "bash", "-c", flag_write_command], capture_output=True, text=True)
+        try:
+            with GuestAgent(vmid=machine_id) as ga:
+                result = ga.exec(flag_write_command)
+        except GuestAgentError as e:
+            raise RuntimeError(f"Guest agent error while writing flags to VM {machine_id}: {e}") from e
 
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to write flags to VM {machine_id}: {result.stderr}")
+        if not result:
+            raise RuntimeError(
+                f"Failed to write flags to VM {machine_id}: {result.stderr}"
+            )
 
     launch_timing_logger(start_flag_write_time, f"[FLAG WRITE COMPLETE]", None, None, VM_ID=machine_id)
 

@@ -19,7 +19,7 @@ if (!$securityHelper->validateSession() || !$securityHelper->validateAdminAccess
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload OVA - CTF Challenger</title>
+    <title>Upload OVA - heiST</title>
     <link rel="stylesheet" href="../assets/css/base.css">
     <link rel="stylesheet" href="../assets/css/upload-diskfile.css">
 </head>

@@ -240,7 +240,7 @@ def setup_backend_certificate():
     subprocess.run(["openssl", "req", "-x509", "-nodes", "-days", "3650",
                     "-newkey", "rsa:2048", "-keyout", BACKEND_CERTIFICATE_KEY_FILE,
                     "-out", BACKEND_CERTIFICATE_FILE, "-subj",
-                    f"/CN={PROXMOX_HOST}/O=CTF Challenger Backend"], check=True, capture_output=True)
+                    f"/CN={PROXMOX_HOST}/O=heiST Backend"], check=True, capture_output=True)
 
 
 def allow_ova_upload_to_proxmox():
@@ -749,7 +749,7 @@ verb 7
 
     env = os.environ.copy()
     env['EASYRSA_BATCH'] = '1'
-    env['EASYRSA_REQ_CN'] = 'CTF Challenger CA'
+    env['EASYRSA_REQ_CN'] = 'heiST CA'
 
     print("\tInitializing Easy-RSA PKI")
     easyrsa_binary = os.path.join(easyrsa_dir, "easyrsa")

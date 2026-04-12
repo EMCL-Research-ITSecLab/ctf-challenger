@@ -10,7 +10,7 @@ $csrf_token = $securityHelper->generateCsrfToken();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up - CTF Challenger</title>
+    <title>Sign Up - heiST</title>
     <link rel="stylesheet" href="../assets/css/base.css">
     <link rel="stylesheet" href="../assets/css/login.css">
 </head>
@@ -25,7 +25,7 @@ $csrf_token = $securityHelper->generateCsrfToken();
     </label>
 </div>
 <div class="login-logo">
-    <a href="/landing">CTF Challenger</a>
+    <a href="/landing">heiST</a>
 </div>
 <div class="login-container">
     <form class="login-form" id="signupForm" method="POST">

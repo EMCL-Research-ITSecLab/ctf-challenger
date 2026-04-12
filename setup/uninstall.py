@@ -70,7 +70,7 @@ CHALLENGES_ROOT_SUBNET_MASK = os.getenv("CHALLENGES_ROOT_SUBNET_MASK", "255.128.
 time_start = datetime.datetime.now()
 
 def uninstall():
-    if input("Are you sure you want to uninstall CTF Challenger? (type 'uninstall' to confirm): ").strip().lower() != "uninstall":
+    if input("Are you sure you want to uninstall heiST? (type 'uninstall' to confirm): ").strip().lower() != "uninstall":
         print("Uninstallation aborted.")
         return
 

@@ -13,7 +13,7 @@ import re
 
 load_dotenv()
 
-BACKEND_DIR = "/root/ctf-challenger/backend"
+BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "10.0.0.1")
@@ -27,14 +27,14 @@ PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 
 UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
-DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/ctf-challenger/database")
+DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 DATABASE_PORT = os.getenv("DATABASE_PORT", "5432")
 DATABASE_HOST = os.getenv("DATABASE_HOST", "10.0.0.102")
 
-WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/ctf-challenger/webserver")
+WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/heiST/webserver")
 WEBSERVER_USER = os.getenv("WEBSERVER_USER", "www-data")
 WEBSERVER_GROUP = os.getenv("WEBSERVER_GROUP", "www-data")
 WEBSERVER_ROOT = os.getenv("WEBSERVER_ROOT", "/var/www/html")
@@ -42,7 +42,7 @@ WEBSERVER_HOST = os.getenv("WEBSERVER_HOST", "10.0.0.101")
 WEBSERVER_HTTP_PORT = os.getenv("WEBSERVER_HTTP_PORT", "80")
 WEBSERVER_HTTPS_PORT = os.getenv("WEBSERVER_HTTPS_PORT", "443")
 
-BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/ctf-challenger/backend")
+BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/heiST/backend")
 
 OPENVPN_SUBNET = os.getenv("OPENVPN_SUBNET", "10.64.0.0/10")
 OPENVPN_SERVER_IP = os.getenv("OPENVPN_SERVER_IP", "10.64.0.1")
@@ -1068,9 +1068,9 @@ def setup_webserver():
     execute_command("sudo chown root:root /var/www/html")
 
     print("\tCreating directories for the logs")
-    execute_command("sudo mkdir -p /var/log/ctf-challenger")
-    execute_command("sudo chown -R www-data:www-data /var/log/ctf-challenger")
-    execute_command("sudo chmod 755 /var/log/ctf-challenger")
+    execute_command("sudo mkdir -p /var/log/heiST")
+    execute_command("sudo chown -R www-data:www-data /var/log/heiST")
+    execute_command("sudo chmod 755 /var/log/heiST")
 
     print("\tCreating directories for the locks")
     execute_command("sudo mkdir -p /var/www/deployment_locks")

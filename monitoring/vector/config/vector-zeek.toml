@@ -388,7 +388,7 @@ password = "SecretPassword"
 
 [sinks.clickhouse.tls]
 verify_certificate = true
-ca_file = "/root/ctf-challenger/setup/certs/fullchain.pem"
+ca_file = "/root/heiST/setup/certs/fullchain.pem"
 
 [sinks.clickhouse.batch]
 max_events = 500

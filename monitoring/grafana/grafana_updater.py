@@ -34,7 +34,7 @@ GRAFANA_URL = f"https://{GRAFANA_HOST_URL}:{GRAFANA_PORT}"
 ADMIN_USER = os.getenv("GRAFANA_USER", "admin")
 ADMIN_PASS = os.getenv("GRAFANA_PASSWORD", "SuperSecure123!")
 
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring")
 GRAFANA_FILES_SETUP_DIR = os.getenv("GRAFANA_FILES_SETUP_DIR", f"{MONITORING_FILES_DIR}/grafana")
 
 # Dashboard files
@@ -46,7 +46,7 @@ WAZUH_DASHBOARD_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/wazuh_dashboard.json"
 SYSTEMD_DASHBOARD_FILE = f"{GRAFANA_FILES_SETUP_DIR}/config/systemd_dashboard.json"
 
 # SSL/TLS certificate paths
-CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/ctf-challenger/setup/certs")
+CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/heiST/setup/certs")
 FULLCHAIN_FILE = f"{CERTS_DIR}/fullchain.pem"
 PRIVKEY_FILE = f"{CERTS_DIR}/privkey.pem"
 

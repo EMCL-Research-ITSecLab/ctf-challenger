@@ -1,5 +1,5 @@
 {
-  "name": "ctf-challenger/webserver",
+  "name": "heiST/webserver",
   "require": {
     "vlucas/phpdotenv": "*",
     "phpunit/phpunit": "*",

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BACKEND_DIR = "/root/ctf-challenger/backend"
+BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 
 from backup_db import backup_database

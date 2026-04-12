@@ -2,7 +2,7 @@ import os
 import sys
 import subprocess
 
-BACKEND_DIR = "/root/ctf-challenger/backend"
+BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 from import_machine_templates import import_machine_templates
 from delete_machine_templates import delete_machine_templates
@@ -19,7 +19,7 @@ def test_plain_ubuntu_setup(db_conn, creator_id=None):
     Setup the a plain Ubuntu machine as challenge for testing purposes.
     """
 
-    UBUNTU_BASE_SERVER_OVA_DIR = "/root/ctf-challenger/setup/ubuntu-base-server/"
+    UBUNTU_BASE_SERVER_OVA_DIR = "/root/heiST/setup/ubuntu-base-server/"
 
 
     if not os.path.exists(UBUNTU_BASE_SERVER_OVA_DIR):

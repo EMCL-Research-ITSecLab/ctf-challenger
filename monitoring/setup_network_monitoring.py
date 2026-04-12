@@ -14,7 +14,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 IPTABLES_FILE = os.getenv("IPTABLES_FILE","/etc/iptables-backend/iptables.sh")
 
@@ -44,10 +44,10 @@ CHALLENGE_NETWORKS = CHALLENGES_ROOT_SUBNET + CHALLENGE_NETWORKS_MASK
 MONITORING_VPN_INTERFACE = os.getenv("MONITORING_VPN_INTERFACE", "ctf_monitoring")
 MONITORING_BACKEND_INTERFACE = os.getenv("BACKEND_NETWORK_DEVICE", "backend")
 MONITORING_DMZ_INTERFACE = os.getenv("MONITORING_DMZ_INTERFACE", "dmz_monitoring")
-CERT_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/ctf-challenger/setup/certs")
+CERT_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/heiST/setup/certs")
 FULLCHAIN = os.path.join(CERT_DIR, "fullchain.pem")
 PRIVKEY = os.path.join(CERT_DIR, "privkey.pem")
-VECTOR_SETUP_DIR = os.getenv("VECTOR_FILES_DIR", "/root/ctf-challenger/monitoring/vector")
+VECTOR_SETUP_DIR = os.getenv("VECTOR_FILES_DIR", "/root/heiST/monitoring/vector")
 VECTOR_DIR = os.getenv("VECTOR_DIR", "/etc/vector/")
 ZEEK_SITE_DIR = Path(os.getenv("ZEEK_SITE_DIR", "/usr/local/zeek/share/zeek/site"))
 SURICATA_LOG_DIR = Path(os.getenv("SURICATA_LOG_DIR", "/var/log/suricata"))

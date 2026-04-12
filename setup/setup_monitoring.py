@@ -15,7 +15,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 
 # Import the script_helper module
@@ -25,7 +25,7 @@ from script_helper import (
     run_cmd, run_cmd_with_realtime_output, Timer, time_function, DEBUG_MODE
 )
 
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring")
 
 # ===== ENVIRONMENT VARIABLES CONFIGURATION =====
 ENV_VARIABLES = [
@@ -358,7 +358,7 @@ def setup_grafana_environment() -> bool:
         log_error("No Grafana environment variables found to export")
         return False
 
-    grafana_files_setup_dir = os.getenv("GRAFANA_FILES_SETUP_DIR", "/root/ctf-challenger/monitoring/grafana")
+    grafana_files_setup_dir = os.getenv("GRAFANA_FILES_SETUP_DIR", "/root/heiST/monitoring/grafana")
     return create_env_file(grafana_env_vars, grafana_files_setup_dir)
 
 
@@ -383,7 +383,7 @@ def setup_vector_environment() -> bool:
         log_error("No Vector environment variables found to export")
         return False
 
-    vector_files_dir = os.getenv("VECTOR_FILES_DIR", "/root/ctf-challenger/monitoring/vector")
+    vector_files_dir = os.getenv("VECTOR_FILES_DIR", "/root/heiST/monitoring/vector")
     return create_env_file(vector_env_vars, vector_files_dir)
 
 
@@ -408,7 +408,7 @@ def setup_backend_environment() -> bool:
         log_error("No Backend environment variables found to export")
         return False
 
-    backend_files_dir = os.getenv("BACKEND_FILES_DIR", "/root/ctf-challenger/backend")
+    backend_files_dir = os.getenv("BACKEND_FILES_DIR", "/root/heiST/backend")
     return append_to_env_file(backend_env_vars, backend_files_dir)
 
 

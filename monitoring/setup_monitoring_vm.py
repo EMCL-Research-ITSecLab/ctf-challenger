@@ -16,7 +16,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 IPTABLES_FILE = os.getenv("IPTABLES_FILE", "/etc/iptables-backend/iptables.sh")
 
@@ -74,9 +74,9 @@ PROXMOX_EXPORTER_PORT = os.getenv("PROXMOX_EXPORTER_PORT", "9221")
 POSTGRES_EXPORTER_PORT = os.getenv("POSTGRES_EXPORTER_PORT", "9187")
 
 VM_NETMASK = "24"
-UBUNTU_BASE_DIR = "/root/ctf-challenger/setup/ubuntu-base-server"
-UBUNTU_BASE_OVA = "/root/ctf-challenger/setup/ubuntu-base-server/ubuntu-base-server.ova"
-UBUNTU_BASE_OVF = "/root/ctf-challenger/setup/ubuntu-base-server/ubuntu-base-server.ovf"
+UBUNTU_BASE_DIR = "/root/heiST/setup/ubuntu-base-server"
+UBUNTU_BASE_OVA = "/root/heiST/setup/ubuntu-base-server/ubuntu-base-server.ova"
+UBUNTU_BASE_OVF = "/root/heiST/setup/ubuntu-base-server/ubuntu-base-server.ovf"
 
 # Initialize Proxmox API connection
 try:

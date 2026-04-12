@@ -176,7 +176,7 @@ class PublicProfile {
     }
 
     updateBasicInfo(profile) {
-        document.title = `${profile.username} | CTF-Challenger`;
+        document.title = `${profile.username} | heiST`;
         this.domElements.usernameDisplay.textContent = profile.username;
         this.domElements.memberSince.textContent = new Date(profile.join_date).toLocaleDateString();
         this.domElements.points.textContent = `${profile.points} points`;

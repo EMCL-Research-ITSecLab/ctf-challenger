@@ -23,7 +23,7 @@ class MockPostgresDB
     private string $dbPassword;
 
     public function __construct(
-        string $dbName = 'ctf-challenger',
+        string $dbName = 'heiST',
         string $dbUser = 'testuser',
         string $dbPassword = 'testpass',
         string $dbScriptsPath = __DIR__ . '/../../../database',

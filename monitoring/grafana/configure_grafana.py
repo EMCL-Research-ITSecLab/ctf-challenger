@@ -29,7 +29,7 @@ requests.Session.request = no_ssl_verification_request
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 
 # Import the script_helper module
@@ -49,7 +49,7 @@ ADMIN_PASS = "admin"
 NEW_ADMIN_PASS = os.getenv("GRAFANA_PASSWORD", "SuperSecure123!")
 PROMETHEUS_PORT = os.getenv("PROMETHEUS_PORT", "9090")
 PROMETHEUS_URL = f"http://{GRAFANA_HOST_URL}:{PROMETHEUS_PORT}"
-GRAFANA_FILES_SETUP_DIR = os.getenv("GRAFANA_FILES_SETUP_DIR", "/root/ctf-challenger/monitoring/grafana")
+GRAFANA_FILES_SETUP_DIR = os.getenv("GRAFANA_FILES_SETUP_DIR", "/root/heiST/monitoring/grafana")
 PROXMOX_SSH_KEYFILE = os.getenv("PROXMOX_SSH_KEYFILE", "/root/.ssh/id_rsa.pub")
 GRAFANA_FILES_DIR = os.getenv("GRAFANA_FILES_DIR", "/etc/grafana")
 GRAFANA_INI_PATH = f"{GRAFANA_FILES_DIR}/grafana.ini"
@@ -76,7 +76,7 @@ CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "default")
 CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "changeme")
 
 # SSL/TLS certificate paths
-CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/ctf-challenger/setup/certs")
+CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/heiST/setup/certs")
 FULLCHAIN_FILE = f"{CERTS_DIR}/fullchain.pem"
 PRIVKEY_FILE = f"{CERTS_DIR}/privkey.pem"
 

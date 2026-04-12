@@ -152,7 +152,7 @@ timeout_secs = 30
 
 [sinks.clickhouse.tls]
 verify_certificate = true
-ca_file = "/root/ctf-challenger/setup/certs/fullchain.pem"
+ca_file = "/root/heiST/setup/certs/fullchain.pem"
 
 # Corrected buffer configuration
 [sinks.clickhouse.buffer]

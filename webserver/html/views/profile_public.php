@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><span id="username-display">User</span> | CTF-Challenger</title>
+    <title><span id="username-display">User</span> | heiST</title>
     <link rel="stylesheet" href="../assets/css/base.css">
     <link rel="stylesheet" href="../assets/css/profile.css">
     <link rel="stylesheet" href="../assets/css/profile_public.css">

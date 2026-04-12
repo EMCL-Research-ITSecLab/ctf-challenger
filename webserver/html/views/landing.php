@@ -12,7 +12,7 @@
 <header>
     <div class="header-container">
         <div class="logo">
-            <a href="/landing">CTF-Challenger</a>
+            <a href="/landing">heiST</a>
         </div>
         <nav>
             <ul>

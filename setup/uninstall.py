@@ -8,7 +8,7 @@ import sys
 
 load_dotenv()
 
-BACKEND_DIR = "/root/ctf-challenger/backend"
+BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "10.0.0.1")
@@ -22,14 +22,14 @@ PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 
 UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
-DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/ctf-challenger/database")
+DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 DATABASE_PORT = os.getenv("DATABASE_PORT", "5432")
 DATABASE_HOST = os.getenv("DATABASE_HOST", "10.0.0.102")
 
-WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/ctf-challenger/webserver")
+WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/heiST/webserver")
 WEBSERVER_USER = os.getenv("WEBSERVER_USER", "www-data")
 WEBSERVER_GROUP = os.getenv("WEBSERVER_GROUP", "www-data")
 WEBSERVER_ROOT = os.getenv("WEBSERVER_ROOT", "/var/www/html")
@@ -37,7 +37,7 @@ WEBSERVER_HOST = os.getenv("WEBSERVER_HOST", "10.0.0.101")
 WEBSERVER_HTTP_PORT = os.getenv("WEBSERVER_HTTP_PORT", "80")
 WEBSERVER_HTTPS_PORT = os.getenv("WEBSERVER_HTTPS_PORT", "443")
 
-BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/ctf-challenger/backend")
+BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/heiST/backend")
 
 OPENVPN_SUBNET = os.getenv("OPENVPN_SUBNET", "10.64.0.0/10")
 OPENVPN_SERVER_IP = os.getenv("OPENVPN_SERVER_IP", "10.64.0.1")
@@ -106,8 +106,8 @@ def uninstall():
 
 def remove_cleanup_service():
     print("\tStopping and disabling cleanup service")
-    subprocess.run(["systemctl", "stop", "ctf-challenger-cleanup.service"], capture_output=True)
-    subprocess.run(["systemctl", "disable", "ctf-challenger-cleanup.service"], capture_output=True)
+    subprocess.run(["systemctl", "stop", "heiST-cleanup.service"], capture_output=True)
+    subprocess.run(["systemctl", "disable", "heiST-cleanup.service"], capture_output=True)
 
     print("\tRemoving cleanup service file")
     subprocess.run(["rm", "-f", f"{SYSTEMD_PATH}/cleanup.service"], capture_output=True)
@@ -155,7 +155,7 @@ def remove_web_and_database_server():
 
 def remove_openvpn_server():
     print("\tRemoving OpenVPN setup working directory")
-    openvpn_setup_dir = "/root/ctf-challenger/setup/openvpn_setup"
+    openvpn_setup_dir = "/root/heiST/setup/openvpn_setup"
     subprocess.run(["rm", "-rf", openvpn_setup_dir], capture_output=True)
 
     print("\tStopping and disabling OpenVPN service")

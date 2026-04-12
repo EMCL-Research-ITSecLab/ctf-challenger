@@ -265,14 +265,15 @@ def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101")
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
     """
-    Wait until QEMU Guest Agent is ready
+    Wait until QEMU Guest Agent is ready.
     """
     start_time = time.time()
     deadline = time.monotonic() + timeout
+    socket_wait_timeout = max(10.0, timeout * 0.9)
 
     while time.monotonic() < deadline:
         try:
-            with GuestAgent(vmid=machine.id) as ga:
+            with GuestAgent(vmid=machine.id, socket_wait_timeout=socket_wait_timeout) as ga:
                 if ga.ping():
                     launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
                     return True

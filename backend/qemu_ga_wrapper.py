@@ -83,7 +83,36 @@ class _QEMUGATransport:
         self._buf = b""
 
 
-    def connect(self) -> None:
+    def wait_for_socket(
+        self,
+        timeout: float = 120.0,
+        poll_interval: float = 1.0,
+    ) -> None:
+        """Block until the socket file appears and is accessible, or raise."""
+        deadline = time.monotonic() + timeout
+        while True:
+            if self._path.exists() and os.access(self._path, os.R_OK | os.W_OK):
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GATimeoutError(
+                    f"Socket {self._path} did not appear within {timeout}s "
+                    f"(is the VM booting and qemu-ga installed?)"
+                )
+            logger.debug(
+                "Waiting for socket %s (%.0fs remaining)…",
+                self._path,
+                remaining,
+            )
+            time.sleep(min(poll_interval, remaining))
+
+    def connect(self, *, wait_timeout: Optional[float] = None) -> None:
+        """Connect to the socket, optionally waiting for it to appear first."""
+        import errno as _errno
+
+        if wait_timeout is not None:
+            self.wait_for_socket(timeout=wait_timeout)
+
         if not self._path.exists():
             raise GASocketNotFoundError(
                 f"QEMU-GA socket not found: {self._path}  "
@@ -94,27 +123,57 @@ class _QEMUGATransport:
                 f"No r/w permission on {self._path}  (run as root)"
             )
 
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(self._connect_timeout)
-        try:
-            sock.connect(str(self._path))
-        except FileNotFoundError:
-            sock.close()
-            raise GASocketNotFoundError(f"Socket vanished: {self._path}")
-        except OSError as exc:
-            sock.close()
-            raise GANotRunningError(
-                f"Cannot connect to {self._path}: {exc}"
-            ) from exc
+        deadline = time.monotonic() + self._connect_timeout
+        last_exc: Optional[OSError] = None
+        while time.monotonic() < deadline:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.setblocking(True)
+            try:
+                sock.connect(str(self._path))
+                sock.settimeout(self._recv_timeout)
+                self._sock = sock
+                self._buf = b""
+                self._flush_greeting()
+                logger.debug("Connected to %s", self._path)
+                return
+            except FileNotFoundError:
+                sock.close()
+                raise GASocketNotFoundError(f"Socket vanished: {self._path}")
+            except OSError as exc:
+                sock.close()
+                if exc.errno == _errno.EAGAIN:
+                    last_exc = exc
+                    logger.debug(
+                        "EAGAIN on connect to %s, retrying…", self._path
+                    )
+                    time.sleep(0.2)
+                    continue
+                raise GANotRunningError(
+                    f"Cannot connect to {self._path}: {exc}"
+                ) from exc
 
-        sock.settimeout(self._recv_timeout)
-        self._sock = sock
-        self._buf = b""
-        self._flush_greeting()
-        logger.debug("Connected to %s", self._path)
+        raise GANotRunningError(
+            f"Cannot connect to {self._path} after retrying for "
+            f"{self._connect_timeout}s: {last_exc}"
+        ) from last_exc
+
+    def _drain(self, timeout: float = 2.0) -> None:
+        """Read and discard everything pending in the socket buffer."""
+        if self._sock is None:
+            return
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                self._sock.settimeout(min(0.1, deadline - time.monotonic()))
+                chunk = self._sock.recv(_RECV_CHUNK)
+                if not chunk:
+                    break
+        except OSError:
+            pass
 
     def close(self) -> None:
         if self._sock is not None:
+            self._drain()
             try:
                 self._sock.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -131,11 +190,29 @@ class _QEMUGATransport:
         return self._sock is not None
 
     def _flush_greeting(self) -> None:
-        """Discard greeting line on first connect."""
+        """Discard optional greeting line emitted on first connect."""
+        assert self._sock is not None
+        deadline = time.monotonic() + _GREETING_TIMEOUT
         try:
-            self._read_line(timeout=_GREETING_TIMEOUT)
-        except GATimeoutError:
-            logger.debug("No greeting received. Continuing.")
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._sock.settimeout(min(remaining, _GREETING_TIMEOUT))
+                try:
+                    chunk = self._sock.recv(_RECV_CHUNK)
+                except socket.timeout:
+                    logger.debug("No greeting received from %s. Continuing.", self._path)
+                    return
+                if not chunk:
+                    return
+                self._buf += chunk
+                nl = self._buf.find(b"\n")
+                if nl != -1:
+                    self._buf = self._buf[nl + 1:]
+                    return
+        except OSError:
+            pass
 
     def _read_line(self, timeout: Optional[float] = None) -> bytes:
         assert self._sock is not None
@@ -150,6 +227,7 @@ class _QEMUGATransport:
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                self.close()  # socket is dirty -> force reconnect on next call
                 raise GATimeoutError(
                     f"Timed out waiting for response from {self._path} "
                     f"(timeout={effective}s)"
@@ -159,6 +237,7 @@ class _QEMUGATransport:
             try:
                 chunk = self._sock.recv(_RECV_CHUNK)
             except socket.timeout:
+                self.close()  # socket is dirty -> force reconnect on next call
                 raise GATimeoutError(
                     f"Timed out waiting for response from {self._path}"
                 ) from None
@@ -248,10 +327,12 @@ class GuestAgent:
         connect_timeout: float = _DEFAULT_CONNECT_TIMEOUT,
         recv_timeout: float = _DEFAULT_RECV_TIMEOUT,
         auto_reconnect: bool = True,
+        socket_wait_timeout: Optional[float] = None,
     ) -> None:
         self.vmid = vmid
         self.windows = windows
         self._auto_reconnect = auto_reconnect
+        self._socket_wait_timeout = socket_wait_timeout
         self._lock = threading.Lock()
         self._transport = _QEMUGATransport(
             _resolve_socket_path(vmid),
@@ -270,7 +351,7 @@ class GuestAgent:
 
     def _ensure_connected(self) -> None:
         if not self._transport.connected:
-            self._transport.connect()
+            self._transport.connect(wait_timeout=self._socket_wait_timeout)
 
     def _call(
         self,
@@ -282,10 +363,10 @@ class GuestAgent:
             self._ensure_connected()
             try:
                 return self._transport.call(command, arguments, timeout=timeout)
-            except GANotRunningError:
+            except (GANotRunningError, GATimeoutError):
                 if self._auto_reconnect:
                     logger.warning(
-                        "VM %s: connection lost. Reconnecting...", self.vmid
+                        "VM %s: connection lost or timed out. Reconnecting...", self.vmid
                     )
                     self._transport.close()
                     self._transport.connect()

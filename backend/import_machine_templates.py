@@ -175,11 +175,14 @@ def convert_iso_to_machine_template(disk_file_path, machine_template_id):
         raise RuntimeError(f"Failed to import ISO file: {e1}")
 
 
-def wait_for_cloud_init_completion(machine, timeout=600):
+def wait_for_cloud_init_completion(machine, timeout=900, socket_wait_timeout=120.0):
     """
     Wait until Cloud-init finishes and the setup script completes.
     Checks for a flag file created by the setup script and verifies systemd timer.
     """
+    _CLOUD_INIT_EXEC_TIMEOUT = max(timeout - 60, 120)
+    _FAST_EXEC_TIMEOUT = 15
+
     checks = {
         'cloud_init': False,
         'bash_logging_timer': False,
@@ -189,15 +192,21 @@ def wait_for_cloud_init_completion(machine, timeout=600):
     start_time = time.monotonic()
     deadline = start_time + timeout
 
-    with GuestAgent(vmid=machine.id) as ga:
+    with GuestAgent(vmid=machine.id, socket_wait_timeout=socket_wait_timeout) as ga:
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start_time)
 
             try:
                 if not checks['cloud_init']:
-                    result = ga.exec("cloud-init status --wait", capture_output=True, timeout=30)
+                    result = ga.exec(
+                        "cloud-init status",
+                        capture_output=True,
+                        timeout=_CLOUD_INIT_EXEC_TIMEOUT,
+                    )
                     if result.exit_code == 0 or "done" in result.stdout.lower():
                         checks['cloud_init'] = True
+                    else:
+                        print(f"[{elapsed}s] cloud-init not done yet: {result.stdout.strip()!r}", flush=True)
                     time.sleep(10)
                     continue
 
@@ -205,27 +214,36 @@ def wait_for_cloud_init_completion(machine, timeout=600):
                     result = ga.exec(
                         ["systemctl", "is-active", "bash_loggin_timer.timer"],
                         capture_output=True,
-                        timeout=30,
+                        timeout=_FAST_EXEC_TIMEOUT,
                     )
                     if result.stdout.strip() == "active":
                         checks['bash_logging_timer'] = True
+                    else:
+                        print(f"[{elapsed}s] bash_loggin_timer not active yet: {result.stdout.strip()!r}", flush=True)
                     time.sleep(10)
                     continue
 
                 flag_result = ga.exec(
                     ["test", "-f", "/var/run/wazuh-setup-complete.flag"],
                     capture_output=False,
-                    timeout=30,
+                    timeout=_FAST_EXEC_TIMEOUT,
                 )
                 timer_result = ga.exec(
                     ["systemctl", "is-active", "bash_loggin_timer.timer"],
                     capture_output=True,
-                    timeout=30,
+                    timeout=_FAST_EXEC_TIMEOUT,
                 )
                 if flag_result.exit_code == 0 and timer_result.stdout.strip() == "active":
                     checks['setup_complete'] = True
                     time.sleep(15)  # stability buffer
                     return True
+                else:
+                    print(
+                        f"[{elapsed}s] waiting for setup: "
+                        f"flag={'present' if flag_result.exit_code == 0 else 'missing'} "
+                        f"timer={timer_result.stdout.strip()!r}",
+                        flush=True,
+                    )
 
             except GuestAgentError as e:
                 print(f"[{elapsed}s] Guest agent error for VM {machine.id}: {type(e).__name__}: {e}", flush=True)

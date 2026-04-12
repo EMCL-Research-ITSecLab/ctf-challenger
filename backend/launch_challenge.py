@@ -382,28 +382,6 @@ def vmid_to_ipv6(vmid, offset=0x1000):
     return f"fd12:3456:789a:1::{high:x}:{low:x}"
 
 
-
-def wait_for_qemu_guest_agent(machine, timeout=120):
-    """
-    Wait until QEMU Guest Agent is ready.
-    """
-    start_time = time.time()
-    deadline = time.monotonic() + timeout
-
-    while time.monotonic() < deadline:
-        try:
-            with GuestAgent(vmid=machine.id) as ga:
-                if ga.ping():
-                    launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
-                    return True
-        except GuestAgentError:
-            pass
-
-        time.sleep(5)
-
-    raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
-
-
 def generate_user_specific_flag(flag_secret, user_unique_id):
     """
     Generate a user-specific flag using the secret and user unique id.

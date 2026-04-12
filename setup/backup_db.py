@@ -14,7 +14,7 @@ BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 
 DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "heist")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_HOST = os.getenv("DATABASE_HOST", "10.0.0.102")
 

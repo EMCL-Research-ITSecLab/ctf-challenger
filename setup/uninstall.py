@@ -23,7 +23,7 @@ PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
 DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "heist")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 DATABASE_PORT = os.getenv("DATABASE_PORT", "5432")

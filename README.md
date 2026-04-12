@@ -33,7 +33,7 @@ SSL_TLS_CERTS_DIR='/root/heiST/setup/certs'
 DNSMASQ_BACKEND_DIR='/etc/dnsmasq-backend'
 
 DATABASE_FILES_DIR='/root/heiST/database'
-DATABASE_NAME='ctf_challenger'
+DATABASE_NAME='heist'
 DATABASE_USER='postgres'
 DATABASE_PASSWORD='ChangeMe123!'
 DATABASE_PORT='5432'

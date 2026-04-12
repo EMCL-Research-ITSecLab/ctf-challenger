@@ -835,7 +835,7 @@ def setup_postgres_exporter():
     sql_commands = [
         f"CREATE USER postgres_exporter WITH PASSWORD '{POSTGRES_EXPORTER_PASSWORD}';",
         "ALTER USER postgres_exporter SET SEARCH_PATH TO postgres_exporter,pg_catalog;",
-        "GRANT CONNECT ON DATABASE ctf_challenger TO postgres_exporter;",
+        "GRANT CONNECT ON DATABASE heist TO postgres_exporter;",
         "GRANT pg_monitor TO postgres_exporter;"
     ]
 
@@ -849,7 +849,7 @@ def setup_postgres_exporter():
         "sudo chmod +x /usr/local/bin/postgres_exporter",
         "sudo useradd -rs /bin/false postgres_exporter || true",
         f"sudo tee /etc/default/postgres_exporter <<EOF\n"
-        f'DATA_SOURCE_NAME="postgresql://postgres_exporter:{POSTGRES_EXPORTER_PASSWORD}@localhost:{DATABASE_PORT}/ctf_challenger?sslmode=disable"\n'
+        f'DATA_SOURCE_NAME="postgresql://postgres_exporter:{POSTGRES_EXPORTER_PASSWORD}@localhost:{DATABASE_PORT}/heist?sslmode=disable"\n'
         "EOF",
         "sudo tee /etc/systemd/system/postgres_exporter.service <<EOF\n"
         "[Unit]\n"
@@ -877,7 +877,7 @@ def setup_postgres_exporter():
         for sql in sql_commands:
             execute_remote_command_with_key(
                 DATABASE_IP,
-                f'sudo -u postgres psql -d ctf_challenger -c "{sql}"',
+                f'sudo -u postgres psql -d heist -c "{sql}"',
                 SSH_USER,
                 PROXMOX_SSH_KEYFILE
             )

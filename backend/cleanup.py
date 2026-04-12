@@ -12,7 +12,7 @@ DATABASE_HOST = os.getenv("DB_HOST", "10.0.0.102")
 DATABASE_PORT = os.getenv("DB_PORT", "5432")
 DATABASE_USER = os.getenv("DB_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DB_PASSWORD")
-DATABASE_NAME = os.getenv("DB_NAME", "ctf_challenger")
+DATABASE_NAME = os.getenv("DB_NAME", "heist")
 
 CLEANUP_COMPLETE_FILE_PATH = "/var/lock/cleanup_complete.lock"
 if not os.path.exists(CLEANUP_COMPLETE_FILE_PATH):

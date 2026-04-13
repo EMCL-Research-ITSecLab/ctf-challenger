@@ -12,7 +12,9 @@
 <header>
     <div class="header-container">
         <div class="logo">
-            <a href="/landing">heiST</a>
+            <a href="/landing">
+                <img id="logo-img" src="/assets/icons/heiST_dark.svg" alt="heiST" />
+            </a>
         </div>
         <nav>
             <ul>
@@ -66,5 +68,6 @@
 
 <?php include($_SERVER['DOCUMENT_ROOT'] . '/partials/footer.html'); ?>
 <script type="module" src="../assets/js/theme-toggle.js"></script>
+<script type="module" src="../assets/js/logo-toggle.js"></script>
 </body>
 </html>

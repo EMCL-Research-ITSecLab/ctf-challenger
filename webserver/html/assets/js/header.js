@@ -1,7 +1,9 @@
-import {apiClient, messageManager} from './utils.js';
+import { apiClient, messageManager } from './utils.js';
+import themeToggleInstance from './theme-toggle.js';
 
 class UserHeader {
     constructor() {
+        this.logoImg = document.getElementById('logo-img');
         this.init();
     }
 
@@ -9,7 +11,22 @@ class UserHeader {
         document.addEventListener('DOMContentLoaded', () => {
             this.setupLogout();
             this.loadUserAvatar();
+            this.setupLogoToggle();
         });
+    }
+
+    setupLogoToggle() {
+        if (!this.logoImg) return;
+
+        this.updateLogo();
+        themeToggleInstance.subscribe(() => this.updateLogo());
+    }
+
+    updateLogo() {
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        this.logoImg.src = isDark
+            ? '/assets/icons/heiST_dark.svg'
+            : '/assets/icons/heiST.svg';
     }
 
     setupLogout() {

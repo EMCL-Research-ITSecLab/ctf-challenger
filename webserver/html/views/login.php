@@ -24,8 +24,10 @@ $csrf_token = $securityHelper->generateCsrfToken();
             </span>
     </label>
 </div>
-<div class="login-logo">
-    <a href="/landing">heiST</a>
+<div class="logo-container">
+    <a href="/landing">
+        <img id="logo-img" src="/assets/icons/heiST_dark.svg" alt="heiST" class="logo-icon" />
+    </a>
 </div>
 <div class="login-container">
     <form class="login-form" id="loginForm" method="POST">
@@ -70,5 +72,6 @@ $csrf_token = $securityHelper->generateCsrfToken();
 </div>
 <script type="module" src="../assets/js/theme-toggle.js"></script>
 <script type="module" src="../assets/js/login.js"></script>
+<script type="module" src="../assets/js/logo-toggle.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
-from proxmox_api_calls import delete_vm_api_call, stop_vm_api_call
-from DatabaseClasses import ChallengeTemplate, MachineTemplate, Challenge, Machine
+from cleanup import teardown_remaining_challenges
+from proxmox_api_calls import delete_vm_api_call
+from DatabaseClasses import ChallengeTemplate, MachineTemplate, Challenge
 import subprocess
 
 
@@ -9,17 +10,27 @@ def delete_machine_templates(challenge_template_id, db_conn):
     """
 
     try:
+        disable_pooling_for_challenge_template(challenge_template_id, db_conn)
+
         challenge_template = fetch_challenge_and_machine_templates(challenge_template_id, db_conn)
 
-        challenges = fetch_running_challenges_and_machines(challenge_template, db_conn)
+        challenges = fetch_running_challenges(challenge_template, db_conn)
     except Exception as e:
         raise ValueError(f"Error fetching challenge and machine templates: {str(e)}")
 
-    stop_running_machines(challenges)
-
-    delete_machines(challenges)
+    teardown_remaining_challenges([challenge.id for challenge in challenges])
 
     delete_machine_template_vms(challenge_template)
+
+
+def disable_pooling_for_challenge_template(challenge_template_id, db_conn):
+    """
+    Disable pooling for a challenge template.
+    """
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("UPDATE challenge_templates SET ready_to_launch = FALSE WHERE id = %s", (challenge_template_id,))
+        db_conn.commit()
 
 
 def fetch_challenge_and_machine_templates(challenge_template_id, db_conn):
@@ -49,7 +60,7 @@ def fetch_challenge_and_machine_templates(challenge_template_id, db_conn):
     return challenge_template
 
 
-def fetch_running_challenges_and_machines(challenge_template, db_conn):
+def fetch_running_challenges(challenge_template, db_conn):
     """
     Fetch the running machine template instances for a challenge.
     """
@@ -63,45 +74,7 @@ def fetch_running_challenges_and_machines(challenge_template, db_conn):
             challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=subnet)
             challenges.append(challenge)
 
-    for challenge in challenges:
-        for machine_template in challenge.template.machine_templates.values():
-            with db_conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM machines WHERE challenge_id = %s AND machine_template_id = %s",
-                               (challenge.id, machine_template.id))
-
-                for machine_id in cursor.fetchall():
-                    machine = Machine(machine_id=machine_id[0], template=machine_template, challenge=challenge)
-                    challenge.add_machine(machine)
-
     return challenges
-
-
-def stop_running_machines(challenges):
-    """
-    Stop the running machine template instances for a challenge.
-    """
-
-    for challenge in challenges:
-        for machine in challenge.machines.values():
-            try:
-                stop_vm_api_call(machine)
-            except Exception:
-                continue
-
-
-def delete_machines(challenges):
-    """
-    Delete the machine template instances for a challenge.
-    """
-
-    for challenge in challenges:
-        for machine in challenge.machines.values():
-            try:
-                delete_vm_api_call(machine)
-            except Exception:
-                subprocess.run(["qm", "stop", str(machine.id)], check=False, capture_output=True)
-                subprocess.run(["qm", "unlock", str(machine.id)], check=True, capture_output=True)
-                subprocess.run(["qm", "destroy", str(machine.id)], check=True, capture_output=True)
 
 
 def delete_machine_template_vms(challenge_template):

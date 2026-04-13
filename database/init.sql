@@ -420,7 +420,8 @@ CREATE TABLE challenge_templates (
     creator_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
     hint TEXT,
     solution TEXT,
-    marked_for_deletion BOOLEAN DEFAULT FALSE
+    marked_for_deletion BOOLEAN DEFAULT FALSE,
+    ready_to_launch BOOLEAN DEFAULT FALSE
 );
 
 
@@ -430,13 +431,33 @@ CREATE TABLE challenge_subnets
     available boolean NOT NULL
 );
 
+CREATE TABLE pool_sizes
+(
+    challenge_template_id BIGINT NOT NULL REFERENCES challenge_templates(id) ON DELETE CASCADE,
+    effective_time TIMESTAMP NOT NULL,
+    size INT NOT NULL,
+    manual_override BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (challenge_template_id, effective_time)
+);
+
+CREATE TYPE challenge_lifecycle_state AS ENUM (
+    'PROVISIONING',
+    'READY',
+    'ASSIGNED',
+    'ACTIVE',
+    'EXPIRED',
+    'TERMINATING'
+);
+
 
 CREATE TABLE challenges (
     id BIGINT PRIMARY KEY DEFAULT allocate_challenge_id(),
     challenge_template_id BIGINT NOT NULL,
     subnet INET REFERENCES challenge_subnets(subnet) ON DELETE CASCADE DEFAULT assign_challenge_subnet(),
-    expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 hour'),
+    expires_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP + INTERVAL '100 years'),
     used_extensions BIGINT DEFAULT 0,
+    pre_assigned_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    lifecycle_state challenge_lifecycle_state NOT NULL,
     FOREIGN KEY (challenge_template_id) REFERENCES challenge_templates(id) ON DELETE CASCADE
 );
 

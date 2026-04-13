@@ -1,17 +1,20 @@
 import random
 import subprocess
+import threading
 
 from subnet_calculations import nth_network_subnet
 from DatabaseClasses import *
 from proxmox_api_calls import *
 import os
 import shlex
-from stop_challenge import delete_iptables_rules, remove_database_entries, stop_dnsmasq_instances,remove_challenge_from_wazuh
-from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+from stop_challenge import stop_challenge
+from warmup_challenge import warmup_challenge
 import time
 from dotenv import load_dotenv, find_dotenv
 import hashlib
 import hmac
+from launch_timing_logger import launch_timing_logger
+from get_db_connection import db_connection_context
 
 load_dotenv(find_dotenv())
 
@@ -28,66 +31,155 @@ os.makedirs(DNSMASQ_INSTANCES_DIR, exist_ok=True)
 challenge_launch_lock_dir = "/var/lock/challenge_launch_locks/"
 os.makedirs(challenge_launch_lock_dir, exist_ok=True)
 
-
-@retry(stop=stop_after_attempt(10), wait=wait_exponential_jitter(initial=1, max=5, exp_base=1.1, jitter=1),
-       reraise=True)
-def launch_challenge(challenge_template_id, user_id, db_conn, vpn_monitoring_device, dmz_monitoring_device):
+def launch_challenge(challenge_template_id, user_id, vpn_monitoring_device, dmz_monitoring_device):
     """
     Launch a challenge by creating a user and network device.
     """
 
-    launch_lock = acquire_exclusive_launch_lock(user_id)
 
-    try:
-        with db_conn:
+
+    with db_connection_context() as db_conn:
+        launch_lock = None
+        try:
+            launch_lock = acquire_exclusive_launch_lock(user_id)
+            start_time = time.time()
+
             try:
+                start_time_db_fetch = time.time()
+                print(f"[Info] DB fetch started for user {user_id} and challenge template {challenge_template_id}", flush=True)
                 user_vpn_ip = fetch_user_vpn_ip(user_id, db_conn)
                 user_email = fetch_user_email(user_id, db_conn)
+                user_unique_id = fetch_user_unique_id(user_id, db_conn)
                 challenge_template = ChallengeTemplate(challenge_template_id)
-                fetch_machines(challenge_template, db_conn)
-                fetch_network_and_connection_templates(challenge_template, db_conn)
-                fetch_domain_templates(challenge_template, db_conn)
                 fetch_challenge_flags(challenge_template, db_conn)
+
+                launch_timing_logger(start_time_db_fetch, "[DB FETCH COMPLETE]", challenge_template_id, user_id)
             except Exception as e:
                 raise ValueError(f"Error fetching from database: {e}")
 
             try:
-                challenge = create_challenge(challenge_template, db_conn)
+                print(f"[Info] Attempting to get ready challenge for template {challenge_template_id} and user {user_id}", flush=True)
+                challenge = get_ready_challenge(challenge_template, db_conn)
+                if challenge is None:
+                    running_warmup_challenge_id = try_attach_to_running_warmup(challenge_template_id, user_id, db_conn)
+                    if running_warmup_challenge_id is not None:
+                        print(f"[Info] Attached to running warmup challenge {running_warmup_challenge_id} for template {challenge_template_id} and user {user_id}", flush=True)
+
+                        while challenge is None:
+                            running_warmup_challenge_id = check_running_warmup(challenge_template_id, user_id, db_conn)
+                            if running_warmup_challenge_id is None:
+                                break
+
+                            challenge = get_ready_challenge(challenge_template, db_conn, user_id)
+                            time.sleep(1)
+
+                if challenge is None:
+                    print(f"[Info] No ready challenge found and attaching failed, creating new challenge for template {challenge_template_id} and user {user_id}", flush=True)
+                    challenge = warmup_challenge(user_id, challenge_template.id, vpn_monitoring_device, dmz_monitoring_device)
+
+                print(f"[Info] Adding running challenge {challenge.id} to user {user_id}", flush=True)
+                add_running_challenge_to_user(challenge, user_id, db_conn)
+
+                print(f"[Info] Got challenge {challenge.id} for template {challenge_template_id} and user {user_id}", flush=True)
+                fetch_machines(challenge, db_conn)
+
+                print(f"[Info] Fetched machines for challenge {challenge.id}", flush=True)
+                fetch_networks_and_connections(challenge, db_conn)
+
             except Exception as e:
+                print(f"[Error] Failed to prepare challenge for launch: {e}", flush=True)
+                try:
+                    stop_challenge(user_id)
+                except Exception as stop_e:
+                    print(f"[Error] Failed to stop challenge after error: {stop_e}", flush=True)
+
                 raise ValueError(f"Error creating challenge: {e}")
 
             try:
-                clone_machines(challenge_template, challenge, db_conn)
-                attach_vrtmon_network(challenge)
-                create_networks_and_connections(challenge_template, challenge, user_id, db_conn)
-                create_domains(challenge_template, challenge, db_conn)
-                create_network_devices(challenge)
-                wait_for_networks_to_be_up(challenge)
-
-                # Attach final networks and start VMs
-                attach_networks_to_vms(challenge)
+                # Network setup
+                start_time_network = time.time()
+                print(f"[Info] Starting network setup for challenge {challenge.id} and user {user_id}", flush=True)
                 start_dnsmasq_instances(challenge, user_vpn_ip)
-                launch_machines(challenge)
+                launch_timing_logger(start_time_network, "[NETWORK SETUP COMPLETE]", challenge_template_id, user_id)
 
-                configure_wazuh_for_challenge(challenge)
+                start_time_user_flags = time.time()
+                print(f"[Info] Starting user-specific flag processing for challenge {challenge.id} and user {user_id}", flush=True)
+                process_all_user_specific_flags(challenge, user_email, user_unique_id)
+                launch_timing_logger(start_time_user_flags, "[USER FLAGS COMPLETE]", challenge_template_id, user_id)
 
-                process_all_user_specific_flags(challenge, user_email)
-
-                add_running_challenge_to_user(challenge, user_id, db_conn)
+                start_time_firewall = time.time()
+                print(f"[Info] Starting iptables rule setup for challenge {challenge.id} and user {user_id}", flush=True)
                 add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monitoring_device)
+                launch_timing_logger(start_time_firewall, "[FIREWALL RULES COMPLETE]", challenge_template_id, user_id)
+
+                reset_expiration_timer(challenge.id, db_conn, expiration_duration_minutes=60)
 
             except Exception as e:
-                undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn)
+                stop_challenge(user_id)
                 raise ValueError(f"Error launching challenge: {e}")
 
             accessible_networks = [network.subnet for network in challenge.networks.values() if network.accessible]
             accessible_networks.sort()
-    except Exception as e:
-        raise e
-    finally:
-        release_exclusive_launch_lock(user_id, launch_lock)
 
-    return accessible_networks
+            launch_timing_logger(start_time, "[LAUNCH COMPLETE]", challenge_template_id, user_id)
+
+        finally:
+            if launch_lock is not None:
+                release_exclusive_launch_lock(user_id, launch_lock)
+
+        return accessible_networks
+
+
+def try_attach_to_running_warmup(challenge_template_id, user_id, db_conn):
+    """
+    Try to attach to a running warmup challenge for the given user ID and challenge template ID.
+    """
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+            WITH running_warmup AS (
+                SELECT id
+                FROM challenges
+                WHERE challenge_template_id = %s
+                AND lifecycle_state = 'PROVISIONING'
+                AND pre_assigned_user_id IS NULL
+                ORDER BY id
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE challenges
+            SET pre_assigned_user_id = %s
+            WHERE id IN (SELECT id FROM running_warmup)
+            RETURNING id;
+        """, (challenge_template_id, user_id))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+    return row[0]
+
+
+def check_running_warmup(challenge_template_id, user_id, db_conn):
+    """
+    Check if there is a running warmup challenge for the given user ID and challenge template ID.
+    """
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT id
+            FROM challenges
+            WHERE challenge_template_id = %s
+            AND lifecycle_state in ('PROVISIONING', 'READY')
+            AND pre_assigned_user_id = %s
+            LIMIT 1;
+        """, (challenge_template_id, user_id))
+        row = cursor.fetchone()
+
+        if row is None:
+            return None
+
+    return row[0]
 
 
 def acquire_exclusive_launch_lock(user_id):
@@ -119,92 +211,134 @@ def release_exclusive_launch_lock(user_id, launch_lock):
         launch_lock.close()
 
 
-def fetch_machines(challenge_template, db_conn):
+def fetch_machines(challenge, db_conn):
     """
-    Fetch machine templates for the given challenge.
-    """
-
-    with db_conn.cursor() as cursor:
-        cursor.execute("SELECT id FROM machine_templates WHERE challenge_template_id = %s", (challenge_template.id,))
-
-        for row in cursor.fetchall():
-            machine_template = MachineTemplate(machine_template_id=row[0], challenge_template=challenge_template)
-
-            # Add machine template to challenge template
-            challenge_template.add_machine_template(machine_template)
-
-
-def fetch_network_and_connection_templates(challenge_template, db_conn):
-    """
-    Fetch network and connection templates for the given machine templates.
-    """
-
-    for machine_template in challenge_template.machine_templates.values():
-        with db_conn.cursor() as cursor:
-            cursor.execute("""
-            SELECT nt.id, nt.accessible, nt.is_dmz
-            FROM network_templates nt, network_connection_templates ct
-            WHERE ct.machine_template_id = %s
-            AND ct.network_template_id = nt.id
-            """, (machine_template.id,))
-
-            for row in cursor.fetchall():
-                network_id = row[0]
-
-                if challenge_template.network_templates.get(network_id) is None:
-                    network_template = NetworkTemplate(network_template_id=network_id, accessible=row[1])
-                    network_template.set_is_dmz(row[2])
-                    challenge_template.add_network_template(network_template)
-                else:
-                    network_template = challenge_template.network_templates[network_id]
-
-                connection_template = ConnectionTemplate(
-                    machine_template=machine_template,
-                    network_template=network_template
-                )
-
-                challenge_template.add_connection_template(connection_template)
-                network_template.add_connected_machine(machine_template)
-                machine_template.add_connected_network(network_template)
-
-
-def fetch_domain_templates(challenge_template, db_conn):
-    """
-    Fetch domain templates for the given machine templates and network templates.
-    """
-
-    for machine_template in challenge_template.machine_templates.values():
-        with db_conn.cursor() as cursor:
-            cursor.execute("""
-            SELECT dt.domain_name
-            FROM domain_templates dt
-            WHERE dt.machine_template_id = %s
-            """, (machine_template.id,))
-
-            for row in cursor.fetchall():
-                domain_template = DomainTemplate(machine_template=machine_template, domain=row[0])
-
-                challenge_template.add_domain_template(domain_template)
-                machine_template.add_domain_template(domain_template)
-
-
-def create_challenge(challenge_template, db_conn):
-    """
-    Create a challenge for the given user ID and challenge template.
+    Fetch machines for the given challenge.
     """
 
     with db_conn.cursor() as cursor:
         cursor.execute("""
-        INSERT INTO challenges (challenge_template_id)
-        VALUES (%s)
-        RETURNING id, subnet
-        """, (challenge_template.id,))
+            SELECT id, machine_template_id
+            FROM machines
+            WHERE challenge_id = %s
+            """, (challenge.id,))
 
-        challenge_id, challenge_subnet_value = cursor.fetchone()
-        challenge_subnet = ChallengeSubnet(challenge_subnet_value)
-        challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=challenge_subnet.subnet)
+        for row in cursor.fetchall():
+            machine_id = row[0]
+            machine_template_id = row[1]
 
-    return challenge
+            machine_template = MachineTemplate(machine_template_id, challenge.template)
+            machine = Machine(machine_id, machine_template, challenge)
+            challenge.add_machine(machine)
+            machine_template.set_child(machine)
+
+def fetch_networks_and_connections(challenge, db_conn):
+    """
+    Fetch networks and connections for the given challenge.
+    """
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT n.id, n.network_template_id, n.subnet, n.host_device, nt.accessible
+            FROM networks n, network_templates nt
+            WHERE n.challenge_id = %s
+            AND n.network_template_id = nt.id
+            """, (challenge.id,))
+
+        for row in cursor.fetchall():
+            network_id = row[0]
+            network_template_id = row[1]
+            subnet = row[2]
+            host_device = row[3]
+            accessible = row[4]
+
+            network_template = NetworkTemplate(network_template_id, accessible)
+            network = Network(network_id, network_template, subnet, host_device, accessible)
+            challenge.add_network(network)
+
+        cursor.execute("""
+            SELECT machine_id, network_id, client_mac, client_ip
+            FROM network_connections
+            WHERE network_id IN (
+                SELECT id FROM networks WHERE challenge_id = %s
+            )
+            """, (challenge.id,))
+
+        for row in cursor.fetchall():
+            machine_id = row[0]
+            network_id = row[1]
+            client_mac = row[2]
+            client_ip = row[3]
+
+            machine = challenge.machines[machine_id]
+            network = challenge.networks[network_id]
+
+            connection = Connection(machine, network, client_mac, client_ip)
+            challenge.add_connection(connection)
+            network.add_connection(connection)
+            machine.add_connection(connection)
+
+
+def get_ready_challenge(challenge_template, db_conn, user_id=None):
+    """
+    Get a ready challenge from the database.
+    """
+
+    with db_conn.cursor() as cursor:
+        if user_id is None:
+            cursor.execute("""
+                WITH ready_challenges AS (
+                    SELECT id, subnet
+                    FROM challenges
+                    WHERE challenge_template_id = %s
+                    AND lifecycle_state = 'READY'
+                    ORDER BY id
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE challenges
+                SET lifecycle_state = 'ASSIGNED'
+                WHERE id IN (SELECT id FROM ready_challenges)
+                RETURNING id, subnet;
+            """, (challenge_template.id,))
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            challenge_id = row[0]
+            subnet = row[1]
+
+            challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=subnet)
+            return challenge
+        else:
+            cursor.execute("""
+                WITH ready_challenges AS (
+                    SELECT id, subnet
+                    FROM challenges
+                    WHERE pre_assigned_user_id = %s
+                    AND challenge_template_id = %s
+                    AND lifecycle_state = 'READY'
+                    ORDER BY id
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE challenges
+                SET lifecycle_state = 'ASSIGNED'
+                WHERE id IN (SELECT id FROM ready_challenges)
+                RETURNING id, subnet;
+            """, (user_id, challenge_template.id))
+            row = cursor.fetchone()
+
+            if row is None:
+                return None
+
+            challenge_id = row[0]
+            subnet = row[1]
+
+            challenge = Challenge(challenge_id=challenge_id, template=challenge_template, subnet=subnet)
+            return challenge
+
 
 
 def clone_machines(challenge_template, challenge, db_conn):
@@ -236,20 +370,6 @@ def clone_machines(challenge_template, challenge, db_conn):
         clone_vm_api_call(machine_template, machine)
 
 
-def attach_vrtmon_network(challenge):
-    """
-    Attach the vrtmon management network (net31) to all VMs.
-    This network is used for monitoring and Wazuh communication.
-    """
-    for machine in challenge.machines.values():
-        add_network_device_api_call(
-            machine.id,
-            nic="net31",
-            bridge="vrtmon",
-            model="e1000",
-            mac_index="0A:01"
-        )
-
 
 def vmid_to_ipv6(vmid, offset=0x1000):
     """
@@ -260,22 +380,6 @@ def vmid_to_ipv6(vmid, offset=0x1000):
     low  = host_id & 0xFFFF
     return f"fd12:3456:789a:1::{high:x}:{low:x}"
 
-
-def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101"):
-    """
-    Configure Wazuh for all machines in a challenge via QEMU Guest Agent
-    """
-    # Wait for all VMs to boot and qemu-ga to be ready
-    for machine in challenge.machines.values():
-        wait_for_qemu_guest_agent(machine)
-
-    # Configure Wazuh on all machines
-    for machine in challenge.machines.values():
-        try:
-            configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip)
-        except Exception as e:
-            print(f"[Error] Failed to configure Wazuh for VM {machine.id}: {e}", flush=True)
-            raise
 
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
@@ -290,6 +394,7 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
 
             if result.returncode == 0:
+                launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
                 return True
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
             pass
@@ -297,59 +402,6 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
         time.sleep(5)
 
     raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
-
-
-def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a:1::101"):
-    """
-    Configure IPv6 on vrtmon interface and Wazuh agent via QEMU Guest Agent
-    """
-    ipv6 = vmid_to_ipv6(machine.id)
-    vrtmon_gw = "fd12:3456:789a:1::1"
-    agent_name = f"Agent_{machine.id}"
-
-    # Step 1: Configure IPv6
-    cmd = f"""iface=$(ip -o link | awk "/0a:01/ {{print \\$2; exit}}" | tr -d :) && \
-    ip -6 addr add {ipv6}/64 dev $iface && \
-    ip -6 route add default via {vrtmon_gw}"""
-
-    subprocess.run(f"qm guest exec {machine.id} -- bash -c '{cmd}'", shell=True, capture_output=True, text=True)
-
-    # Step 2: Stop Wazuh agent if running
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "stop", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # Ignore errors
-
-    # Step 3: Register agent with manager
-    cmd = [
-        "qm", "guest", "exec", str(machine.id), "--",
-        "/var/monitoring/wazuh-agent/setup_wazuh.sh",
-        "--register",
-        f"--manager={manager_ip}",
-        f"--name={agent_name}",
-        f"--password={WAZUH_ENROLLMENT_PASSWORD}",
-        "--yes"
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to register Wazuh agent for VM {machine.id}: {result.stderr}")
-
-    # Step 4: Start Wazuh agent
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "daemon-reload"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "enable", "wazuh-agent"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "systemctl", "start", "wazuh-agent"]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to start Wazuh agent for VM {machine.id}: {result.stderr}")
-
-    # Step 5: Clean up monitoring directory
-    cmd = ["qm", "guest", "exec", str(machine.id), "--", "rm", "-rf", "/var/monitoring"]
-    subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
 
 def generate_user_specific_flag(flag_secret, user_unique_id):
@@ -365,63 +417,97 @@ def generate_user_specific_flag(flag_secret, user_unique_id):
     return f"ITSEC{{{hash_value}}}"
 
 
-def process_all_user_specific_flags(challenge, user_unique_id):
+def process_all_user_specific_flags(challenge, user_email, user_unique_id):
     """
     Process all user-specific flags for the challenge.
     Generates personalized flags and writes them to the appropriate VMs.
     """
-    if not hasattr(challenge.template, 'flags'):
-        return
+    try:
+        if not hasattr(challenge.template, 'flags'):
+            print(f"[Info] No flags defined for challenge template {challenge.template.id}", flush=True)
+            return
 
-    flags_by_machine = {}
-    for flag in challenge.template.flags:
-        if flag['user_specific'] and flag['machine_template_id']:
-            machine_template_id = flag['machine_template_id']
-            if machine_template_id not in flags_by_machine:
-                flags_by_machine[machine_template_id] = []
-            flags_by_machine[machine_template_id].append(flag)
+        flags_by_machine = {}
+        for flag in challenge.template.flags:
+            if flag['user_specific'] and flag['machine_template_id']:
+                machine_template_id = flag['machine_template_id']
 
-    for machine_template_id, flags in flags_by_machine.items():
-        machine = None
-        for m in challenge.machines.values():
-            if m.template.id == machine_template_id:
-                machine = m
-                break
+                print(f"[Info] Processing flag {flag} for machine template {machine_template_id}", flush=True)
 
-        if machine is None:
-            print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
-            continue
+                machine = None
+                for m in challenge.machines.values():
+                    if m.template.id == machine_template_id:
+                        machine = m
+                        break
 
-        try:
-            write_user_specific_flags_to_vm(machine, flags, user_unique_id)
-        except Exception as e:
-            print(f"[Error] Failed to write flags to VM {machine.id}: {e}", flush=True)
-            raise
+                    if machine is None:
+                        print(f"[Warning] Machine template {machine_template_id} not found in challenge", flush=True)
+                        continue
+
+                if machine.id not in flags_by_machine:
+                    flags_by_machine[machine.id] = []
+
+                print(f"[Info] Processing flag {flag} for machine {machine.id}", flush=True)
+
+                user_flag = generate_user_specific_flag(flag['flag'], user_unique_id)
+                print(f"[Info] Generated user-specific flag for {user_unique_id}: {user_flag}", flush=True)
+                flag_path = f"/root/flag_{flag['order_index']}.txt"
+                flags_by_machine[machine.id].append({
+                    'flag': user_flag,
+                    'path': flag_path,
+                })
 
 
-def write_user_specific_flags_to_vm(machine, flags, user_unique_id):
+    except Exception as e:
+        print(f"[Error] Failed to process flags for challenge {challenge.id}, user {user_email}: {e}", flush=True)
+        raise e
+
+    print(f"[Info] Finished generating user-specific flags for challenge {challenge.id} and user {user_email}", flush=True)
+
+    try:
+        flag_write_threads = []
+        for machine_id, flags in flags_by_machine.items():
+            flag_write_threads.append(threading.Thread(target=write_user_specific_flags_to_vm, args=(machine_id, flags)))
+
+        print("[Info] Starting threads", flush=True)
+
+        for thread in flag_write_threads:
+            thread.start()
+
+        for thread in flag_write_threads:
+            thread.join()
+
+    except Exception as e:
+        print(f"[Error] Failed to write user-specific flags to VMs: {e}", flush=True)
+        raise e
+
+
+def write_user_specific_flags_to_vm(machine_id, flags):
     """
     Write user-specific flags to a VM via QEMU Guest Agent.
     """
+    start_flag_write_time = time.time()
+
+    flag_write_command = ""
     for flag in flags:
-        order_index = flag['order_index']
-        flag_secret = flag['flag']
+        escaped_flag = shlex.quote(flag['flag'])
+        flag_path = flag['path']
 
-        personalized_flag = generate_user_specific_flag(flag_secret, user_unique_id)
+        flag_write_command += f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path} && "
 
-        flag_path = f"/root/flag_{order_index}.txt"
+    print(f"[Info] Writing flags to VM {machine_id}: {flag_write_command}", flush=True)
 
-        escaped_flag = shlex.quote(personalized_flag)
-
-        cmd = ["qm", "guest", "exec", str(machine.id), "--",
-               "bash", "-c", f"echo {escaped_flag} > {flag_path} && chmod 600 {flag_path}"]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if flag_write_command != "":
+        flag_write_command = flag_write_command.rstrip(" && ")
+        result = subprocess.run(["qm", "guest", "exec", str(machine_id), "--",
+                    "bash", "-c", flag_write_command], capture_output=True, text=True)
 
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to write flag {order_index} to VM {machine.id}: {result.stderr}")
+            raise RuntimeError(f"Failed to write flags to VM {machine_id}: {result.stderr}")
 
-        print(f"[Info] Written flag_{order_index}.txt to VM {machine.id}", flush=True)
+    launch_timing_logger(start_flag_write_time, f"[FLAG WRITE COMPLETE]", None, None, VM_ID=machine_id)
+
+    print(f"[Info] Successfully wrote flags to VM {machine_id}", flush=True)
 
 
 def generate_mac_address(machine_id, local_network_id, local_connection_id):
@@ -447,102 +533,6 @@ def generate_mac_address(machine_id, local_network_id, local_connection_id):
     return mac
 
 
-def create_networks_and_connections(challenge_template, challenge, user_id, db_conn):
-    """
-    Create networks and connections for the given challenge.
-    """
-
-    possible_network_subnets = []
-
-    for i in range(2**4):
-        possible_network_subnets.append(nth_network_subnet(challenge.subnet_ip, i))
-
-    network_subnets = random.sample(possible_network_subnets, len(challenge_template.network_templates))
-
-    local_network_id = 0
-    for network_template, network_subnet in zip(challenge_template.network_templates.values(), network_subnets):
-        local_network_id += 1
-        available_client_ips = {nth_machine_ip(network_subnet[:-3], i) for i in range(2, 15)}
-
-        user_id_hex = f"{user_id:06x}"
-        local_network_id_hex = f"{local_network_id:01x}"
-
-        network_host_device = f"vrt{user_id_hex}{local_network_id_hex}"
-
-        if len(network_host_device) != 10:
-            raise ValueError(f"Network host device must be 10 hex digits, got {len(network_host_device)} hex digits "
-                             f"({network_host_device})")
-
-        with db_conn.cursor() as cursor:
-            cursor.execute("""
-            INSERT INTO networks (network_template_id, subnet, host_device, challenge_id)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id""", (network_template.id, network_subnet, network_host_device, challenge.id))
-
-            network_id = cursor.fetchone()[0]
-            network = Network(
-                network_id=network_id,
-                template=network_template,
-                subnet=network_subnet,
-                host_device=network_host_device,
-                accessible=network_template.accessible
-            )
-            network.set_is_dmz(network_template.is_dmz)
-            challenge.add_network(network)
-
-        for local_connection_id, machine_template in enumerate(network_template.connected_machines.values()):
-            machine = machine_template.child
-
-            client_mac = generate_mac_address(machine.id, local_network_id, local_connection_id)
-            client_ip = random.choice(list(available_client_ips))
-            available_client_ips.remove(client_ip)
-
-            if machine is None:
-                raise ValueError("Machine ID not found")
-
-            with db_conn.cursor() as cursor:
-                cursor.execute("""
-                INSERT INTO network_connections (machine_id, network_id, client_mac, client_ip)
-                VALUES (%s, %s, %s, %s)
-                """, (machine.id, network.id, client_mac, client_ip))
-
-                connection = Connection(machine=machine, network=network, client_mac=client_mac, client_ip=client_ip)
-                challenge.add_connection(connection)
-                network.add_connection(connection)
-                machine.add_connection(connection)
-
-
-def create_domains(challenge_template, challenge, db_conn):
-    """
-    Create domains for the given challenge.
-    """
-
-    for domain_template in challenge_template.domain_templates.values():
-        machine = domain_template.machine_template.child
-
-        with db_conn.cursor() as cursor:
-            cursor.execute("""
-            INSERT INTO domains (machine_id, domain_name)
-            VALUES (%s, %s)
-            """, (machine.id, domain_template.domain))
-
-            domain = Domain(machine=machine, domain=domain_template.domain)
-            challenge.add_domain(domain)
-
-            machine.add_domain(domain)
-
-
-def create_network_devices(challenge):
-    """
-    Configure network devices for the given challenge and user ID.
-    """
-
-    for network in challenge.networks.values():
-        create_network_api_call(network)
-
-    reload_network_api_call()
-
-
 def fetch_user_vpn_ip(user_id, db_conn):
     """
     Fetch the VPN IP address for the given user ID.
@@ -562,11 +552,25 @@ def fetch_user_email(user_id, db_conn):
     Fetch the email address for the given user ID.
     """
     with db_conn.cursor() as cursor:
+        cursor.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        user_email = cursor.fetchone()[0]
+
+    if user_email is None:
+        raise ValueError("User email not found")
+
+    return user_email
+
+
+def fetch_user_unique_id(user_id, db_conn):
+    """
+    Fetch the unique id for the given user ID.
+    """
+    with db_conn.cursor() as cursor:
         cursor.execute("SELECT unique_id FROM users WHERE id = %s", (user_id,))
         unique_id = cursor.fetchone()[0]
 
     if unique_id is None:
-        raise ValueError("User email not found")
+        raise ValueError("User unique id not found")
 
     return unique_id
 
@@ -577,11 +581,11 @@ def fetch_challenge_flags(challenge_template, db_conn):
     """
     with db_conn.cursor() as cursor:
         cursor.execute("""
-                       SELECT id, flag, description, points, order_index, user_specific, machine_template_id
-                       FROM challenge_flags
-                       WHERE challenge_template_id = %s
-                       ORDER BY order_index
-                       """, (challenge_template.id,))
+           SELECT id, flag, description, points, order_index, user_specific, machine_template_id
+           FROM challenge_flags
+           WHERE challenge_template_id = %s
+           ORDER BY order_index
+       """, (challenge_template.id,))
 
         challenge_template.flags = []
         for row in cursor.fetchall():
@@ -601,6 +605,13 @@ def add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monito
     """
     Update iptables rules for the given user VPN IP.
     """
+
+    # Remove general user block from an earlier challenge stop
+    subprocess.run(["iptables", "-D", "FORWARD", "-s", user_vpn_ip, "-d", CHALLENGES_ROOT_SUBNET_CIDR, "-j", "DROP"],
+                     check=False, capture_output=True)
+    subprocess.run(["iptables", "-D", "FORWARD", "-s", CHALLENGES_ROOT_SUBNET_CIDR, "-d", user_vpn_ip, "-j", "DROP"],
+                     check=False, capture_output=True)
+
     for network in challenge.networks.values():
         # Allow intra-network traffic
         subprocess.run(
@@ -678,34 +689,6 @@ def add_iptables_rules(challenge, user_vpn_ip, vpn_monitoring_device, dmz_monito
             ], check=True)
 
 
-def wait_for_networks_to_be_up(challenge, try_timeout=3, max_tries=10):
-    """
-    Wait for networks to be up.
-    """
-
-    host_devices = [network.host_device for network in challenge.networks.values()]
-    all_devices_up = False
-
-    tries = 0
-
-    while not all_devices_up and tries < max_tries:
-        tries += 1
-        try_start = time.time()
-
-        while time.time() - try_start < try_timeout and not all_devices_up:
-            all_devices_up = True
-            for device in host_devices:
-                if not os.path.exists(f"/sys/class/net/{device}"):
-                    all_devices_up = False
-
-        if not all_devices_up:
-            reload_network_api_call()
-
-    if not all_devices_up:
-        raise TimeoutError("Timed out waiting for networks to be up")
-
-
-
 def start_dnsmasq_instances(challenge, user_vpn_ip):
     """
     Start a dnsmasq process per network that needs DNS/DHCP, isolated by interface.
@@ -714,13 +697,6 @@ def start_dnsmasq_instances(challenge, user_vpn_ip):
     """
 
     machines_with_user_routes = {}
-    machines_with_internet_access = {}
-
-    # Collect upstream DNS servers per machine
-    dns_servers_by_machine = {machine_id: [] for machine_id in challenge.machines.keys()}
-    for machine in challenge.machines.values():
-        for connection in machine.connections.values():
-            dns_servers_by_machine[machine.id].append(connection.network.router_ip)
 
     for network in challenge.networks.values():
         config_path = os.path.join(DNSMASQ_INSTANCES_DIR, f"dnsmasq_{network.host_device}.conf")
@@ -728,45 +704,18 @@ def start_dnsmasq_instances(challenge, user_vpn_ip):
         leases_path = os.path.join(DNSMASQ_INSTANCES_DIR, f"dnsmasq_{network.host_device}.leases")
         log_path = os.path.join(DNSMASQ_INSTANCES_DIR, f"dnsmasq_{network.host_device}.log")
 
-        with open(config_path, "w") as f:
-            # Interface binding
-            f.write(f"interface={network.host_device}\n")
-            f.write("bind-interfaces\n")
-            f.write("except-interface=lo\n")
-
-            # DHCP range and router option
-            f.write(f"dhcp-range={network.available_start_ip},{network.available_end_ip},24h\n")
-            f.write(f"dhcp-option=option:router,{network.router_ip}\n")
-
-            # Ensure dnsmasq only answers known domains and ignores unknown
-            f.write("no-resolv\n")          # ignore /etc/resolv.conf
-            f.write("no-poll\n")            # don't poll resolv.conf
-
-            # For each connected machine, set DHCP and DNS behavior
-            for connection in network.connections.values():
-                tag = f"{connection.machine.id}"
-
-                # DHCP host mapping and per-machine DNS
-                f.write(f"dhcp-host={connection.client_mac},{connection.client_ip},set:{tag}\n")
-                upstream = ",".join(dns_servers_by_machine[connection.machine.id])
-
-                # Fallback to public DNS only if desired
-                f.write(f"dhcp-option=tag:{tag},option:dns-server,{upstream},8.8.8.8,8.8.4.4\n")
-
-                # Static route for first eligible machine
-                if connection.machine.id not in machines_with_user_routes and network.accessible:
-                    machines_with_user_routes[connection.machine.id] = connection
-                    f.write(f"dhcp-option=tag:{tag},option:classless-static-route,{user_vpn_ip}/32,"
+        for connection in network.connections.values():
+            if connection.machine.id not in machines_with_user_routes and network.accessible:
+                machines_with_user_routes[connection.machine.id] = connection
+                with open(config_path, "a") as f:
+                    f.write(f"dhcp-option=tag:{connection.machine.id},option:classless-static-route,{user_vpn_ip}/32,"
                             f"{network.router_ip}\n")
 
-                if network.is_dmz:
-                    if connection.machine.id not in machines_with_internet_access:
-                        machines_with_internet_access[connection.machine.id] = connection
-                        f.write(f"dhcp-option=tag:{tag},option:classless-static-route,0.0.0.0/0,{network.router_ip}\n")
-
-                # Add only authoritative server for each domain
-                for domain in connection.machine.domains:
-                    f.write(f"address=/{domain}/{connection.client_ip}\n")
+        print(f"[Info] Starting dnsmasq for network {network.id} on device {network.host_device}", flush=True)
+        print(f"[Info] Config path: {config_path}", flush=True)
+        print(f"[Info] Leases path: {leases_path}", flush=True)
+        print(f"[Info] Log path: {log_path}", flush=True)
+        print(f"[Info] Pidfile path: {pidfile_path}", flush=True)
 
         # Launch the isolated dnsmasq instance
         subprocess.Popen([
@@ -777,23 +726,7 @@ def start_dnsmasq_instances(challenge, user_vpn_ip):
             f"--log-facility={log_path}",
         ])
 
-
-def attach_networks_to_vms(challenge):
-    """
-    Attach networks to virtual machines.
-    """
-
-    for machine in challenge.machines.values():
-        attach_networks_to_vm_api_call(machine)
-
-
-def launch_machines(challenge):
-    """
-    Launch machines.
-    """
-
-    for machine in challenge.machines.values():
-        launch_vm_api_call(machine)
+        print(f"[Info] Started dnsmasq for network {network.id} on device {network.host_device}", flush=True)
 
 
 def add_running_challenge_to_user(challenge, user_id, db_conn):
@@ -805,56 +738,14 @@ def add_running_challenge_to_user(challenge, user_id, db_conn):
         cursor.execute("UPDATE users SET running_challenge = %s WHERE id = %s", (challenge.id, user_id))
 
 
-def undo_launch_challenge(challenge, user_id, user_vpn_ip, db_conn):
+def reset_expiration_timer(challenge_id, db_conn, expiration_duration_minutes=60):
     """
-    Undo the launch of a challenge by stopping and deleting the machines and networks.
-    """
-
-    if challenge is None:
-        return
-
-    stop_and_delete_machines(challenge)
-    delete_network_devices(challenge)
-    delete_iptables_rules(challenge, user_vpn_ip)
-    stop_dnsmasq_instances(challenge)
-    remove_database_entries(challenge, user_id, db_conn)
-    remove_challenge_from_wazuh(challenge)
-
-
-def stop_and_delete_machines(challenge):
-    """
-    Stop and delete the machines for a challenge.
+    Reset the expiration timer for the challenge.
     """
 
-    for machine in challenge.machines.values():
-        try:
-            out = subprocess.run(["qm", "stop", str(machine.id), "--skiplock"], check=True, capture_output=True)
-        except Exception as e:
-            print(f"[Warning] Failed to stop VM {machine.id}: {e}", flush=True)
-            try:
-                print(out.stdout.decode(), flush=True)
-                print(out.stderr.decode(), flush=True)
-            except Exception:
-                pass
-
-        try:
-            out = subprocess.run(["qm", "destroy", str(machine.id), "--skiplock"], check=True, capture_output=True)
-        except Exception as e:
-            print(f"[Warning] Failed to destroy VM {machine.id}: {e}", flush=True)
-            try:
-                print(out.stdout.decode(), flush=True)
-                print(out.stderr.decode(), flush=True)
-            except Exception:
-                pass
-
-
-def delete_network_devices(challenge):
-    """
-    Delete network devices for the given challenge.
-    """
-
-    for network in challenge.networks.values():
-        try:
-            delete_network_api_call(network)
-        except Exception:
-            pass
+    with db_conn.cursor() as cursor:
+        cursor.execute("""
+            UPDATE challenges
+            SET expires_at = CURRENT_TIMESTAMP + INTERVAL '%s minutes'
+            WHERE id = %s
+        """, (expiration_duration_minutes, challenge_id))

@@ -86,10 +86,12 @@ WEBSERVER_DATABASE_PASSWORD = os.getenv("WEBSERVER_DATABASE_PASSWORD")
 MONITORING_VPN_INTERFACE = os.getenv("MONITORING_VPN_INTERFACE", "ctf_monitoring")
 MONITORING_DMZ_INTERFACE = os.getenv("MONITORING_DMZ_INTERFACE", "dmz_monitoring")
 MONITORING_HOST = os.getenv("MONITORING_HOST", "10.0.0.103")
+MONITORING_VM_ID = os.getenv("MONITORING_VM_ID", "9000")
 WAZUH_PORT = os.getenv("WAZUH_API_PORT", "55000")
 WAZUH_USER = os.getenv("WAZUH_API_USER", "wazuh-wui")
 WAZUH_PASSWORD = os.getenv("WAZUH_API_PASSWORD", "MyS3cr37P450r.*-")
 WAZUH_ENROLLMENT_PASSWORD = os.getenv("WAZUH_ENROLLMENT_PASSWORD", "")
+WAZUH_NETWORK_DEVICE = os.getenv("WAZUH_NETWORK_DEVICE", BACKEND_NETWORK_DEVICE)
 
 
 REUSE_DOWNLOADED_OVA = True
@@ -157,6 +159,9 @@ def setup():
 
     print("\nStarting backend")
     start_backend()
+
+    print("\tSetting up pool manager service")
+    start_pool_manager()
 
     print("\nSetting up cleanup service")
     setup_cleanup_service()
@@ -393,10 +398,12 @@ def generate_and_distribute_env_files(backend_api_token, web_server_api_token):
         backend_env_file.write(f"MONITORING_VPN_INTERFACE='{MONITORING_VPN_INTERFACE}'\n")
         backend_env_file.write(f"MONITORING_DMZ_INTERFACE='{MONITORING_DMZ_INTERFACE}'\n")
         backend_env_file.write(f"MONITORING_HOST='{MONITORING_HOST}'\n")
+        backend_env_file.write(f"MONITORING_VM_ID={MONITORING_VM_ID}\n")
         backend_env_file.write(f"WAZUH_API_PORT='{WAZUH_PORT}'\n")
         backend_env_file.write(f"WAZUH_API_USER='{WAZUH_USER}'\n")
         backend_env_file.write(f"WAZUH_API_PASSWORD='{WAZUH_PASSWORD}'\n")
         backend_env_file.write(f"WAZUH_ENROLLMENT_PASSWORD='{WAZUH_ENROLLMENT_PASSWORD}'\n")
+        backend_env_file.write(f"WAZUH_NETWORK_DEVICE='{WAZUH_NETWORK_DEVICE}'\n")
 
     print("\tGenerating testing .env file")
     with open(os.path.join(TESTING_FILES_DIR, ".env"), "w") as testing_env_file:
@@ -1400,14 +1407,15 @@ def setup_database(conn=None, create_admin_config=True):
     with conn.cursor() as cursor:
         cursor.execute(init_script)
 
-    for functions_file in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions")):
-        if functions_file.endswith(".sql"):
-            if not connection_managed_externally:
-                print(f"\tExecuting functions/{functions_file} script")
-            with open(os.path.join(DATABASE_FILES_DIR, "functions", functions_file), "r") as file:
-                functions_script = file.read()
-            with conn.cursor() as cursor:
-                cursor.execute(functions_script)
+    for schema_dir in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions")):
+        for functions_file in os.listdir(os.path.join(DATABASE_FILES_DIR, "functions", schema_dir)):
+            if functions_file.endswith(".sql"):
+                if not connection_managed_externally:
+                    print(f"\tExecuting functions/{functions_file} script")
+                with open(os.path.join(DATABASE_FILES_DIR, "functions", schema_dir, functions_file), "r") as file:
+                    functions_script = file.read()
+                with conn.cursor() as cursor:
+                    cursor.execute(functions_script)
 
     if not connection_managed_externally:
         print("\tGenerating and executing UDF migration script")
@@ -1435,10 +1443,12 @@ def setup_database(conn=None, create_admin_config=True):
     with conn.cursor() as cursor:
         WEBSITE_ADMIN_PASSWORD_SALT = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
         WEBSITE_ADMIN_PASSWORD_HASH = hashlib.sha512((WEBSITE_ADMIN_PASSWORD_SALT + WEBSITE_ADMIN_PASSWORD).encode()).hexdigest()
+        # Timestamp timezone offset is arbitrary. It is added to mirror the postgres now()::TEXT format for consistency.
+        WEBSITE_ADMIN_UNIQUE_ID = hashlib.sha256((WEBSITE_ADMIN_USER + "admin@localhost.local" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f+00") + os.urandom(8).hex()).encode()).hexdigest()
 
         cursor.execute(
-            f"INSERT INTO users (username, email, password_hash, password_salt, is_admin) VALUES (%s, %s, %s, %s, %s)",
-            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD_HASH, WEBSITE_ADMIN_PASSWORD_SALT, True))
+            "INSERT INTO users (username, email, password_hash, password_salt, is_admin, unique_id) VALUES (%s, %s, %s, %s, %s, %s)",
+            (WEBSITE_ADMIN_USER, "admin@localhost.local", WEBSITE_ADMIN_PASSWORD_HASH, WEBSITE_ADMIN_PASSWORD_SALT, True, WEBSITE_ADMIN_UNIQUE_ID))
 
     conn.commit()
 
@@ -1508,7 +1518,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={BACKEND_FILES_DIR}
-ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/main.py
+ExecStart=/usr/bin/python3 {BACKEND_FILES_DIR}/api.py
 Restart=always
 RestartSec=5
 TimeoutStartSec=0
@@ -1524,6 +1534,36 @@ WantedBy=multi-user.target
     subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
     subprocess.run(["systemctl", "enable", "backend"], check=True, capture_output=True)
     subprocess.run(["systemctl", "start", "backend"], check=True, capture_output=True)
+
+
+def start_pool_manager():
+    """
+    Start the pool manager service.
+    """
+
+    pool_manager_service = f"""[Unit]
+Description=Pool Manager Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={BACKEND_FILES_DIR}
+ExecStart=/usr/bin/python3 -u {BACKEND_FILES_DIR}/pool_manager.py
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    with open(os.path.join(SYSTEMD_PATH, "pool_manager.service"), "w") as service_file:
+        service_file.write(pool_manager_service)
+
+    print("\tEnabling and starting pool manager service")
+    subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
+    subprocess.run(["systemctl", "enable", "pool_manager"], check=True, capture_output=True)
+    subprocess.run(["systemctl", "start", "pool_manager"], check=True, capture_output=True)
 
 
 def setup_cleanup_service():
@@ -1551,6 +1591,19 @@ WantedBy=multi-user.target
     print("\tEnabling and starting cleanup service")
     subprocess.run(["systemctl", "daemon-reload"], check=True, capture_output=True)
     subprocess.run(["systemctl", "enable", "cleanup"], check=True, capture_output=True)
+
+
+def setup_pool_size_prediction_cron_job():
+    """
+    Setup the pool size prediction cron job to run every day at 5:30 AM.
+    """
+
+    print("\tSetting up pool size prediction cron job")
+    cron_job = f"30 5 * * * root /usr/bin/python3 {BACKEND_FILES_DIR}/pool_size_prediction.py >> /var/log/pool_size_prediction.log 2>&1\n"
+    with open("/etc/cron.d/pool_size_prediction", "w") as cron_file:
+        cron_file.write(cron_job)
+    subprocess.run(["chmod", "644", "/etc/cron.d/pool_size_prediction"], check=True, capture_output=True)
+    subprocess.run(["chown", "root:root", "/etc/cron.d/pool_size_prediction"], check=True, capture_output=True)
 
 
 if __name__ == "__main__":

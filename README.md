@@ -1,15 +1,15 @@
 
-# CTF-Challenger
+# heiST
 
 ## Setup
 
 To set up the service, follow these steps:
 1. Disable the Proxmox VE repositories to prevent error output from apt update
 2. Clone this repository into `/root/`
-3. `cd /root/ctf-challenger/setup/`
-4. Edit the `/root/ctf-challenger/setup/.env` variables to suit the environment of the Proxmox installation and the desired values
-5. Install pre-requisites by running `bash /root/ctf-challenger/setup/install_requirements.sh`
-6. Run the setup by executing `python3 /root/ctf-challenger/setup/setup.py`
+3. `cd /root/heiST/setup/`
+4. Edit the `/root/heiST/setup/.env` variables to suit the environment of the Proxmox installation and the desired values
+5. Install pre-requisites by running `bash /root/heiST/setup/install_requirements.sh`
+6. Run the setup by executing `python3 /root/heiST/setup/setup.py`
 7. Wait for the setup to complete, which may take a while (~10 minutes)
 8. After the setup is complete, you can access the service at `http://localhost/` or `http://<external-proxmox-ip>/`
 
@@ -29,17 +29,17 @@ PROXMOX_LVM_STORAGE='local-lvm'
 PROXMOX_SSH_KEYFILE='/root/.ssh/id_rsa'
 
 UBUNTU_BASE_SERVER_URL='ChangeMeToYourMirror'
-SSL_TLS_CERTS_DIR='/root/ctf-challenger/setup/certs'
+SSL_TLS_CERTS_DIR='/root/heiST/setup/certs'
 DNSMASQ_BACKEND_DIR='/etc/dnsmasq-backend'
 
-DATABASE_FILES_DIR='/root/ctf-challenger/database'
-DATABASE_NAME='ctf_challenger'
+DATABASE_FILES_DIR='/root/heiST/database'
+DATABASE_NAME='heist'
 DATABASE_USER='postgres'
 DATABASE_PASSWORD='ChangeMe123!'
 DATABASE_PORT='5432'
 DATABASE_HOST='10.0.0.102'
 
-WEBSERVER_FILES_DIR='/root/ctf-challenger/webserver'
+WEBSERVER_FILES_DIR='/root/heiST/webserver'
 WEBSERVER_USER='www-data'
 WEBSERVER_GROUP='www-data'
 WEBSERVER_ROOT='/var/www/html'
@@ -50,7 +50,7 @@ WEBSERVER_HTTPS_PORT='443'
 WEBSERVER_DATABASE_USER='api_user'
 WEBSERVER_DATABASE_PASSWORD='ChangeMe123!'
 
-BACKEND_FILES_DIR='/root/ctf-challenger/backend'
+BACKEND_FILES_DIR='/root/heiST/backend'
 BACKEND_LOGGING_DIR='/var/log/backend'
 
 OPENVPN_SUBNET='10.64.0.0/16'
@@ -86,12 +86,12 @@ MONITORING_VM_NAME='monitoring-vm'
 MONITORING_VM_MEMORY='10240'
 MONITORING_VM_CORES='2'
 MONITORING_VM_DISK='32G'
-MONITORING_FILES_DIR='/root/ctf-challenger/monitoring'
+MONITORING_FILES_DIR='/root/heiST/monitoring'
 
 GRAFANA_PORT='3000'
 GRAFANA_USER='admin'
 GRAFANA_PASSWORD='ChangeMe123!'
-GRAFANA_FILES_SETUP_DIR='/root/ctf-challenger/monitoring/grafana'
+GRAFANA_FILES_SETUP_DIR='/root/heiST/monitoring/grafana'
 GRAFANA_FILES_DIR='/etc/grafana'
 
 PROMETHEUS_PORT='9090'
@@ -120,7 +120,7 @@ WAZUH_NETWORK_DEVICE_IPV6='fd12:3456:789a:1::1'
 WAZUH_NETWORK_DEVICE_CIDR='64'
 WAZUH_NETWORK_SUBNET='fd12:3456:789a:1::/64'
 WAZUH_MANAGER_IPV6='fd12:3456:789a:1::101/64'
-WAZUH_FILE_DIR='/root/ctf-challenger/monitoring/wazuh'
+WAZUH_FILE_DIR='/root/heiST/monitoring/wazuh'
 WAZUH_REGISTRATION_PORT='1515'
 WAZUH_COMMUNICATION_PORT='1514'
 
@@ -128,10 +128,10 @@ CLICKHOUSE_HTTPS_PORT='8443'
 CLICKHOUSE_NATIVE_PORT='9440'
 CLICKHOUSE_USER='default'
 CLICKHOUSE_PASSWORD='ChangeMe123!'
-CLICKHOUSE_SQL_DIR='/root/ctf-challenger/monitoring/clickhouse/sql'
+CLICKHOUSE_SQL_DIR='/root/heiST/monitoring/clickhouse/sql'
 MONITORING_DNS='clickhouse.local'
 
-VECTOR_FILES_DIR='/root/ctf-challenger/monitoring/vector'
+VECTOR_FILES_DIR='/root/heiST/monitoring/vector'
 VECTOR_DIR='/etc/vector'
 
 SURICATA_LOG_DIR='/var/log/suricata'

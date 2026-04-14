@@ -262,7 +262,7 @@ def wait_for_cloud_init_completion(machine, timeout=600):
 
 
 def write_user_data_snippet(snippets_path="/var/lib/vz/snippets/user-data.yaml",
-                            config_dir="/root/ctf-challenger/monitoring/wazuh/agent"):
+                            config_dir="/root/heiST/monitoring/wazuh/agent"):
     """
     Write a Cloud-Init user-data.yaml snippet with files encoded in Base64.
     Includes all files from config_dir/config/* and the .sh script.

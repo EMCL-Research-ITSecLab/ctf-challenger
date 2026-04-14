@@ -26,8 +26,8 @@ BACKEND_PORT = os.getenv("BACKEND_PORT", "8000")
 
 BACKEND_LOGGING_DIR = os.getenv("BACKEND_LOGGING_DIR", "/var/log/backend")
 
-BACKEND_CERTIFICATE_FILE = os.getenv("BACKEND_CERTIFICATE_FILE", "/root/ctf-challenger/backend.crt")
-BACKEND_CERTIFICATE_KEY_FILE = os.getenv("BACKEND_CERTIFICATE_KEY_FILE", "/root/ctf-challenger/backend.key")
+BACKEND_CERTIFICATE_FILE = os.getenv("BACKEND_CERTIFICATE_FILE", "/root/heiST/backend.crt")
+BACKEND_CERTIFICATE_KEY_FILE = os.getenv("BACKEND_CERTIFICATE_KEY_FILE", "/root/heiST/backend.key")
 
 BACKEND_AUTHENTICATION_TOKEN = os.getenv("BACKEND_AUTHENTICATION_TOKEN")
 

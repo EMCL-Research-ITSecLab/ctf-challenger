@@ -15,7 +15,7 @@ SSH_KEYFILE = "/path/to/ssh/keyfile"
 REMOTE_LOG_DIRS = {
     "suricata_json": "/var/log/suricata/rotated/daily",
     "pcap": "/var/log/suricata/rotated/pcap",
-    "database_backups": "/root/ctf-challenger/database/backups"
+    "database_backups": "/root/heiST/database/backups"
 }
 
 # Local base directory for archived logs

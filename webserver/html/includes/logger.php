@@ -15,10 +15,10 @@ class Logger implements ILogger
 
     public function __construct(
         string $route,
-        string $errorLogFile = '/var/log/ctf-challenger/api_errors.log',
-        string $infoLogFile = '/var/log/ctf-challenger/api_info.log',
-        string $debugLogFile = '/var/log/ctf-challenger/api_debug.log',
-        string $warningLogFile = '/var/log/ctf-challenger/api_warning.log',
+        string $errorLogFile = '/var/log/heiST/api_errors.log',
+        string $infoLogFile = '/var/log/heiST/api_info.log',
+        string $debugLogFile = '/var/log/heiST/api_debug.log',
+        string $warningLogFile = '/var/log/heiST/api_warning.log',
         ISystem $system = new SystemWrapper()
     )
     {

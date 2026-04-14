@@ -12,7 +12,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 
 # Import the script_helper module
@@ -26,7 +26,7 @@ from script_helper import (
 MONITORING_IP = os.getenv("MONITORING_HOST", "10.0.0.103")
 SSH_USER = os.getenv("MONITORING_VM_USER", "ubuntu")
 NEW_SSH_PASSWORD = os.getenv("MONITORING_VM_PASSWORD", "meow1234")
-WAZUH_FILE_DIR = os.getenv("WAZUH_FILE_DIR", "/root/ctf-challenger/monitoring/wazuh")
+WAZUH_FILE_DIR = os.getenv("WAZUH_FILE_DIR", "/root/heiST/monitoring/wazuh")
 WAZUH_MANAGER_DIRECTORY = f"{WAZUH_FILE_DIR}/manager"
 BANNER_SERVER = f"{WAZUH_FILE_DIR}/banner/banner_server.py"
 PROXMOX_SSH_KEYFILE = os.getenv("PROXMOX_SSH_KEYFILE", "/root/.ssh/id_rsa.pub")

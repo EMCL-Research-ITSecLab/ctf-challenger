@@ -13,7 +13,7 @@ import re
 
 load_dotenv()
 
-BACKEND_DIR = "/root/ctf-challenger/backend"
+BACKEND_DIR = "/root/heiST/backend"
 sys.path.append(BACKEND_DIR)
 
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "10.0.0.1")
@@ -27,14 +27,14 @@ PROXMOX_HOSTNAME = os.getenv("PROXMOX_HOSTNAME", "pve")
 
 UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
 
-DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/ctf-challenger/database")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "ctf_challenger")
+DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "heist")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")
 DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD")
 DATABASE_PORT = os.getenv("DATABASE_PORT", "5432")
 DATABASE_HOST = os.getenv("DATABASE_HOST", "10.0.0.102")
 
-WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/ctf-challenger/webserver")
+WEBSERVER_FILES_DIR = os.getenv("WEBSERVER_FILES_DIR", "/root/heiST/webserver")
 WEBSERVER_USER = os.getenv("WEBSERVER_USER", "www-data")
 WEBSERVER_GROUP = os.getenv("WEBSERVER_GROUP", "www-data")
 WEBSERVER_ROOT = os.getenv("WEBSERVER_ROOT", "/var/www/html")
@@ -42,7 +42,7 @@ WEBSERVER_HOST = os.getenv("WEBSERVER_HOST", "10.0.0.101")
 WEBSERVER_HTTP_PORT = os.getenv("WEBSERVER_HTTP_PORT", "80")
 WEBSERVER_HTTPS_PORT = os.getenv("WEBSERVER_HTTPS_PORT", "443")
 
-BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/ctf-challenger/backend")
+BACKEND_FILES_DIR = os.getenv("BACKEND_FILES_DIR", "/root/heiST/backend")
 
 OPENVPN_SUBNET = os.getenv("OPENVPN_SUBNET", "10.64.0.0/10")
 OPENVPN_SERVER_IP = os.getenv("OPENVPN_SERVER_IP", "10.64.0.1")
@@ -74,7 +74,7 @@ CHALLENGES_ROOT_SUBNET_MASK = os.getenv("CHALLENGES_ROOT_SUBNET_MASK", "255.128.
 
 TESTING_FILES_DIR = os.path.join(BACKEND_FILES_DIR, "tests", "utils")
 TESTING_DATABASE_BASE_DIR = os.getenv("TESTING_DATABASE_BASE_DIR", "/tmp/pg_test_base")
-TESTING_DATABASE_NAME = os.getenv("TESTING_DATABASE_NAME", "ctf_challenger")
+TESTING_DATABASE_NAME = os.getenv("TESTING_DATABASE_NAME", "heist")
 TESTING_DATABASE_USER = os.getenv("TESTING_DATABASE_USER", "postgres")
 TESTING_DATABASE_PASSWORD = os.getenv("TESTING_DATABASE_PASSWORD")
 TESTING_DATABASE_PORT = os.getenv("TESTING_DATABASE_PORT", "5432")
@@ -240,7 +240,7 @@ def setup_backend_certificate():
     subprocess.run(["openssl", "req", "-x509", "-nodes", "-days", "3650",
                     "-newkey", "rsa:2048", "-keyout", BACKEND_CERTIFICATE_KEY_FILE,
                     "-out", BACKEND_CERTIFICATE_FILE, "-subj",
-                    f"/CN={PROXMOX_HOST}/O=CTF Challenger Backend"], check=True, capture_output=True)
+                    f"/CN={PROXMOX_HOST}/O=heiST Backend"], check=True, capture_output=True)
 
 
 def allow_ova_upload_to_proxmox():
@@ -749,7 +749,7 @@ verb 7
 
     env = os.environ.copy()
     env['EASYRSA_BATCH'] = '1'
-    env['EASYRSA_REQ_CN'] = 'CTF Challenger CA'
+    env['EASYRSA_REQ_CN'] = 'heiST CA'
 
     print("\tInitializing Easy-RSA PKI")
     easyrsa_binary = os.path.join(easyrsa_dir, "easyrsa")
@@ -1068,9 +1068,9 @@ def setup_webserver():
     execute_command("sudo chown root:root /var/www/html")
 
     print("\tCreating directories for the logs")
-    execute_command("sudo mkdir -p /var/log/ctf-challenger")
-    execute_command("sudo chown -R www-data:www-data /var/log/ctf-challenger")
-    execute_command("sudo chmod 755 /var/log/ctf-challenger")
+    execute_command("sudo mkdir -p /var/log/heiST")
+    execute_command("sudo chown -R www-data:www-data /var/log/heiST")
+    execute_command("sudo chmod 755 /var/log/heiST")
 
     print("\tCreating directories for the locks")
     execute_command("sudo mkdir -p /var/www/deployment_locks")

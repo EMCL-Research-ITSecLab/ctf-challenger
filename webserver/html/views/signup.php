@@ -10,7 +10,8 @@ $csrf_token = $securityHelper->generateCsrfToken();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up - CTF Challenger</title>
+    <title>Sign Up - heiST</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/icons/favicon.svg">
     <link rel="stylesheet" href="../assets/css/base.css">
     <link rel="stylesheet" href="../assets/css/login.css">
 </head>
@@ -24,8 +25,10 @@ $csrf_token = $securityHelper->generateCsrfToken();
             </span>
     </label>
 </div>
-<div class="login-logo">
-    <a href="/landing">CTF Challenger</a>
+<div class="logo-container">
+    <a href="/landing">
+        <img id="logo-img" src="/assets/icons/heiST_dark.svg" alt="heiST" class="logo-icon" />
+    </a>
 </div>
 <div class="login-container">
     <form class="login-form" id="signupForm" method="POST">
@@ -79,5 +82,6 @@ $csrf_token = $securityHelper->generateCsrfToken();
 </div>
 <script type="module" src="../assets/js/theme-toggle.js"></script>
 <script type="module" src="../assets/js/signup.js"></script>
+<script type="module" src="../assets/js/logo-toggle.js"></script>
 </body>
 </html>

@@ -16,7 +16,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/ctf-challenger/monitoring")
+MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 
 # Import the script_helper module
@@ -36,12 +36,12 @@ MONITORING_IP = os.getenv("MONITORING_HOST", "10.0.0.103")
 PROXMOX_IP = os.getenv("PROXMOX_HOST", "10.0.0.1")
 DATABASE_IP = os.getenv("DATABASE_HOST", "10.0.0.102")
 MONITORING_CTF_INTERFACE = os.getenv("MONITORING_VPN_INTERFACE", "ctf_monitoring")
-SSL_TLS_CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/ctf-challenger/setup/certs")
+SSL_TLS_CERTS_DIR = os.getenv("SSL_TLS_CERTS_DIR", "/root/heiST/setup/certs")
 FULLCHAIN_FILE = f"{SSL_TLS_CERTS_DIR}/fullchain.pem"
 PRIVKEY_FILE = f"{SSL_TLS_CERTS_DIR}/privkey.pem"
 CLICKHOUSE_HTTPS_PORT = os.getenv("CLICKHOUSE_HTTPS_PORT", "8443")
 CLICKHOUSE_NATIVE_PORT = os.getenv("CLICKHOUSE_NATIVE_PORT", "9440")
-CLICKHOUSE_SQL_DIR = os.getenv("CLICKHOUSE_SQL_DIR", "/root/ctf-challenger/monitoring/clickhouse/sql")
+CLICKHOUSE_SQL_DIR = os.getenv("CLICKHOUSE_SQL_DIR", "/root/heiST/monitoring/clickhouse/sql")
 PROXMOX_SSH_KEYFILE = os.getenv("PROXMOX_SSH_KEYFILE", "/root/.ssh/id_rsa.pub")
 CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "changeme")
 CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "default")

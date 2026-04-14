@@ -91,24 +91,9 @@ header {
     padding: 0 20px;
 }
 
-.logo a {
-    font-size: 1.8rem;
-    text-decoration: none;
-    color: var(--color-primary);
-    font-weight: bold;
-    font-family: 'Courier New', monospace;
-    letter-spacing: -2px;
-    text-transform: uppercase;
-    border: 2px solid var(--color-border);
-    padding: 5px 10px;
-    border-radius: 5px;
-    transition: all 0.3s ease;
-}
-
-.logo a:hover {
-    color: var(--color-primary-hover);
-    border-color: var(--color-primary-hover);
-    background-color: var(--color-button-hover-bg);
+.logo img {
+    height: 56px;
+    width: auto;
 }
 
 nav ul {

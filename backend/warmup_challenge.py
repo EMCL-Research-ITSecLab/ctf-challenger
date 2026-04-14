@@ -269,18 +269,13 @@ def wait_for_qemu_guest_agent(machine, timeout=120):
     """
     start_time = time.time()
     deadline = time.monotonic() + timeout
-    socket_wait_timeout = max(10.0, timeout * 0.9)
 
-    while time.monotonic() < deadline:
-        try:
-            with GuestAgent(vmid=machine.id, socket_wait_timeout=socket_wait_timeout) as ga:
-                if ga.ping():
-                    launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
-                    return True
-        except GuestAgentError:
-            pass
-
-        time.sleep(5)
+    with GuestAgent(vmid=machine.id) as ga:
+        while time.monotonic() < deadline:
+            if ga.ping():
+                launch_timing_logger(start_time, "[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
+                return True
+            time.sleep(5)
 
     raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
 

@@ -175,12 +175,13 @@ def convert_iso_to_machine_template(disk_file_path, machine_template_id):
         raise RuntimeError(f"Failed to import ISO file: {e1}")
 
 
-def wait_for_cloud_init_completion(machine, timeout=900, socket_wait_timeout=120.0):
+def wait_for_cloud_init_completion(machine, timeout=600):
     """
     Wait until Cloud-init finishes and the setup script completes.
     Checks for a flag file created by the setup script and verifies systemd timer.
     """
-    _CLOUD_INIT_EXEC_TIMEOUT = max(timeout - 60, 120)
+    _PING_TIMEOUT = 120
+    _CLOUD_INIT_EXEC_TIMEOUT = max(timeout - 180, 120) # 120+4*15=180
     _FAST_EXEC_TIMEOUT = 15
 
     checks = {
@@ -192,7 +193,17 @@ def wait_for_cloud_init_completion(machine, timeout=900, socket_wait_timeout=120
     start_time = time.monotonic()
     deadline = start_time + timeout
 
-    with GuestAgent(vmid=machine.id, socket_wait_timeout=socket_wait_timeout) as ga:
+    with GuestAgent(vmid=machine.id) as ga:
+        ping_deadline = time.monotonic() + _PING_TIMEOUT
+        while not ga.ping():
+            if time.monotonic() > ping_deadline:
+                raise TimeoutError(
+                    f"QEMU GA on VM {machine.id} did not become responsive within {_PING_TIMEOUT}s"
+                )
+            time.sleep(2)
+
+        print(f"[Info] GA responsive on VM {machine.id}, starting cloud-init wait", flush=True)
+
         while time.monotonic() < deadline:
             elapsed = int(time.monotonic() - start_time)
 
@@ -383,6 +394,10 @@ def undo_import_machine_templates(challenge_template):
         except Exception:
             try:
                 subprocess.run(["qm", "unlock", str(machine_template.id)], check=True, capture_output=True)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["qm", "stop", str(machine_template.id)], check=True, capture_output=True)
             except Exception:
                 pass
             try:

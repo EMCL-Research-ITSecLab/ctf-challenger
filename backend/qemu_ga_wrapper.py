@@ -27,6 +27,7 @@ _DEFAULT_RECV_TIMEOUT: float = 10.0
 _DEFAULT_EXEC_TIMEOUT: float = 30.0
 _RECV_CHUNK: int = 4096
 _GREETING_TIMEOUT: float = 3.0
+_DEFAULT_SOCKET_WAIT_TIMEOUT: float = 120.0
 
 class GuestAgentError(Exception):
     """Base exception for all qemu-ga errors."""
@@ -327,7 +328,7 @@ class GuestAgent:
         connect_timeout: float = _DEFAULT_CONNECT_TIMEOUT,
         recv_timeout: float = _DEFAULT_RECV_TIMEOUT,
         auto_reconnect: bool = True,
-        socket_wait_timeout: Optional[float] = None,
+        socket_wait_timeout: Optional[float] = _DEFAULT_SOCKET_WAIT_TIMEOUT,
     ) -> None:
         self.vmid = vmid
         self.windows = windows

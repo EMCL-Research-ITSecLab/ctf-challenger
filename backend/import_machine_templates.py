@@ -1,8 +1,7 @@
-import subprocess
 from proxmox_api_calls import *
+from qemu_ga_wrapper import GuestAgent, GuestAgentError
 from DatabaseClasses import MachineTemplate, ChallengeTemplate
 from hashlib import sha256
-import json
 import time
 import random
 
@@ -178,87 +177,96 @@ def convert_iso_to_machine_template(disk_file_path, machine_template_id):
 
 def wait_for_cloud_init_completion(machine, timeout=600):
     """
-    Wait until Cloud init finishes and the setup script completes.
+    Wait until Cloud-init finishes and the setup script completes.
     Checks for a flag file created by the setup script and verifies systemd timer.
     """
-    start_time = time.time()
+    _PING_TIMEOUT = 120
+    _CLOUD_INIT_EXEC_TIMEOUT = max(timeout - 180, 120) # 120+4*15=180
+    _FAST_EXEC_TIMEOUT = 15
+
     checks = {
         'cloud_init': False,
         'bash_logging_timer': False,
         'setup_complete': False
     }
 
-    while time.time() - start_time < timeout:
-        elapsed = int(time.time() - start_time)
+    start_time = time.monotonic()
+    deadline = start_time + timeout
 
-        try:
-            # Phase 1: Cloud-init Status
-            if not checks['cloud_init']:
-                cmd = f"qm guest exec {machine.id} -- bash -c \"cloud-init status --wait\""
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+    with GuestAgent(vmid=machine.id) as ga:
+        ping_deadline = time.monotonic() + _PING_TIMEOUT
+        while not ga.ping():
+            if time.monotonic() > ping_deadline:
+                raise TimeoutError(
+                    f"QEMU GA on VM {machine.id} did not become responsive within {_PING_TIMEOUT}s"
+                )
+            time.sleep(2)
 
-                if "done" in result.stdout.lower() or result.returncode == 0:
-                    checks['cloud_init'] = True
+        print(f"[Info] GA responsive on VM {machine.id}, starting cloud-init wait", flush=True)
+
+        while time.monotonic() < deadline:
+            elapsed = int(time.monotonic() - start_time)
+
+            try:
+                if not checks['cloud_init']:
+                    result = ga.exec(
+                        "cloud-init status",
+                        capture_output=True,
+                        timeout=_CLOUD_INIT_EXEC_TIMEOUT,
+                    )
+                    if result.exit_code == 0 or "done" in result.stdout.lower():
+                        checks['cloud_init'] = True
+                    else:
+                        print(f"[{elapsed}s] cloud-init not done yet: {result.stdout.strip()!r}", flush=True)
+                    time.sleep(10)
                     continue
 
-            # Phase 2: Check for bash_loggin_timer.timer
-            if checks['cloud_init'] and not checks['bash_logging_timer']:
-                cmd = f"qm guest exec {machine.id} -- bash -c \"systemctl is-active bash_loggin_timer.timer 2>/dev/null\""
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-
-                try:
-                    result_data = json.loads(result.stdout)
-                    status = result_data.get('out-data', '').strip()
-                except:
-                    status = result.stdout.strip()
-
-                if status == "active":
-                    checks['bash_logging_timer'] = True
-
-            # Phase 3: Check for Setup-Complete Flag
-            if checks['bash_logging_timer'] and not checks['setup_complete']:
-                cmd = f"qm guest exec {machine.id} -- bash -c \"test -f /var/run/wazuh-setup-complete.flag && echo 'SETUP_COMPLETE'\""
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
-
-                try:
-                    result_data = json.loads(result.stdout)
-                    output = result_data.get('out-data', '').strip()
-                except:
-                    output = result.stdout.strip()
-
-                if "SETUP_COMPLETE" in output:
-                    checks['setup_complete'] = True
-
-                    cmd_check = f"qm guest exec {machine.id} -- bash -c \"systemctl is-active bash_loggin_timer.timer 2>/dev/null\""
-                    result_check = subprocess.run(cmd_check, shell=True, capture_output=True, text=True, timeout=30)
-
-                    # Parse JSON output
-                    try:
-                        check_data = json.loads(result_check.stdout)
-                        timer_status = check_data.get('out-data', '').strip()
-                    except:
-                        timer_status = result_check.stdout.strip()
-
-                    if timer_status == "active":
-                        # Extra buffer time to ensure everything is stable
-                        time.sleep(15)
-                        return True
+                if not checks['bash_logging_timer']:
+                    result = ga.exec(
+                        ["systemctl", "is-active", "bash_loggin_timer.timer"],
+                        capture_output=True,
+                        timeout=_FAST_EXEC_TIMEOUT,
+                    )
+                    if result.stdout.strip() == "active":
+                        checks['bash_logging_timer'] = True
                     else:
-                        checks['setup_complete'] = False  # Reset to check again
+                        print(f"[{elapsed}s] bash_loggin_timer not active yet: {result.stdout.strip()!r}", flush=True)
+                    time.sleep(10)
+                    continue
 
-        except subprocess.TimeoutExpired as e:
-            print(f"[{elapsed}s] Command timeout for VM {machine.id}: {e}", flush=True)
-        except subprocess.CalledProcessError as e:
-            print(f"[{elapsed}s] Command failed for VM {machine.id}: {e}", flush=True)
-        except Exception as e:
-            print(f"[{elapsed}s] Unexpected error for VM {machine.id}: {type(e).__name__}: {e}", flush=True)
+                flag_result = ga.exec(
+                    ["test", "-f", "/var/run/wazuh-setup-complete.flag"],
+                    capture_output=False,
+                    timeout=_FAST_EXEC_TIMEOUT,
+                )
+                timer_result = ga.exec(
+                    ["systemctl", "is-active", "bash_loggin_timer.timer"],
+                    capture_output=True,
+                    timeout=_FAST_EXEC_TIMEOUT,
+                )
+                if flag_result.exit_code == 0 and timer_result.stdout.strip() == "active":
+                    checks['setup_complete'] = True
+                    time.sleep(15)  # stability buffer
+                    return True
+                else:
+                    print(
+                        f"[{elapsed}s] waiting for setup: "
+                        f"flag={'present' if flag_result.exit_code == 0 else 'missing'} "
+                        f"timer={timer_result.stdout.strip()!r}",
+                        flush=True,
+                    )
 
-        time.sleep(10)
+            except GuestAgentError as e:
+                print(f"[{elapsed}s] Guest agent error for VM {machine.id}: {type(e).__name__}: {e}", flush=True)
+            except Exception as e:
+                print(f"[{elapsed}s] Unexpected error for VM {machine.id}: {type(e).__name__}: {e}", flush=True)
 
-    # Timeout
+            time.sleep(10)
+
     incomplete = [k for k, v in checks.items() if not v]
     raise TimeoutError(
         f"Setup did not complete within {timeout}s for VM {machine.id}. Incomplete: {', '.join(incomplete)}")
+
 
 
 def write_user_data_snippet(snippets_path="/var/lib/vz/snippets/user-data.yaml",
@@ -386,6 +394,10 @@ def undo_import_machine_templates(challenge_template):
         except Exception:
             try:
                 subprocess.run(["qm", "unlock", str(machine_template.id)], check=True, capture_output=True)
+            except Exception:
+                pass
+            try:
+                subprocess.run(["qm", "stop", str(machine_template.id)], check=True, capture_output=True)
             except Exception:
                 pass
             try:

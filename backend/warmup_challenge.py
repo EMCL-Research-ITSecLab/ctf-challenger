@@ -15,6 +15,7 @@ import hashlib
 import hmac
 from launch_timing_logger import launch_timing_logger
 from get_db_connection import db_connection_context
+from qemu_ga_wrapper import GuestAgent, GuestAgentError
 
 load_dotenv(find_dotenv())
 
@@ -264,22 +265,17 @@ def configure_wazuh_for_challenge(challenge, manager_ip="fd12:3456:789a:1::101")
 
 def wait_for_qemu_guest_agent(machine, timeout=120):
     """
-    Wait until QEMU Guest Agent is ready
+    Wait until QEMU Guest Agent is ready.
     """
     start_time = time.time()
+    deadline = time.monotonic() + timeout
 
-    while time.time() - start_time < timeout:
-        try:
-            cmd = f"qm guest exec {machine.id} -- echo 'ready'"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-
-            if result.returncode == 0:
-                launch_timing_logger(start_time, f"[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
+    with GuestAgent(vmid=machine.id) as ga:
+        while time.monotonic() < deadline:
+            if ga.ping():
+                launch_timing_logger(start_time, "[GUEST AGENT RESPONDED]", machine.challenge.template.id, None, VM_ID=machine.id)
                 return True
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-            pass
-
-        time.sleep(5)
+            time.sleep(5)
 
     raise TimeoutError(f"QEMU Guest Agent timeout for VM {machine.id}")
 
@@ -313,14 +309,13 @@ def configure_ipv6_and_wazuh_via_guest_agent(machine, manager_ip="fd12:3456:789a
     rm -rf /var/monitoring
     """
 
-    cmd = [
-        "qm", "guest", "exec", str(machine.id),
-        "--", "bash", "-c", aggregated_cmd
-    ]
+    try:
+        with GuestAgent(vmid=machine.id) as ga:
+            result = ga.exec(aggregated_cmd, timeout=120)
+    except GuestAgentError as e:
+        raise RuntimeError(f"Guest agent error while configuring Wazuh for VM {machine.id}: {e}") from e
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-
-    if result.returncode != 0:
+    if not result:
         raise RuntimeError(
             f"Failed to configure Wazuh for VM {machine.id}: {result.stderr}"
         )

@@ -1,7 +1,7 @@
-from create_user import create_user
-from delete_user import delete_user
-from launch_challenge import launch_challenge
-from stop_challenge import stop_challenge
+from tests.performance.utils.create_user import create_user
+from tests.performance.utils.delete_user import delete_user
+from tests.performance.utils.launch_challenge import launch_challenge
+from tests.performance.utils.stop_challenge import stop_challenge
 
 class TestUser:
     def __init__(self, username, password, email):

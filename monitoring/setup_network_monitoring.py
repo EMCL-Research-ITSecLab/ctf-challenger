@@ -14,13 +14,9 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
-UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 IPTABLES_FILE = os.getenv("IPTABLES_FILE","/etc/iptables-backend/iptables.sh")
 
-# Import the script_helper module
-sys.path.append(UTILS_DIR)
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section,
     run_cmd, run_cmd_with_realtime_output, Timer, time_function, DEBUG_MODE
 )
@@ -69,14 +65,25 @@ def install_local_packages():
     """Install required system packages for monitoring"""
     log_section("Installing Local Monitoring Packages")
 
+    debian_version = None
+    with open("/etc/os-release") as f:
+        for line in f:
+            if line.startswith("DEBIAN_VERSION_FULL="):
+                debian_version = line.strip().split("=")[1].strip('"').split(".")[0]
+
+    if not debian_version:
+        debian_version = "12"
+
+
+
     # Add Zeek repository
     zeek_install_commands = [
         ["apt-get", "install", "-y", "apt-transport-https", "ca-certificates", "curl", "gnupg"],
         ["bash", "-c",
-         "curl -fsSL https://download.opensuse.org/repositories/security:zeek/Debian_12/Release.key | "
+         f"curl -fsSL https://download.opensuse.org/repositories/security:zeek/Debian_{debian_version}/Release.key | "
          "gpg --dearmor -o /etc/apt/trusted.gpg.d/zeek.gpg"],
         ["bash", "-c",
-         'echo "deb [arch=amd64] https://download.opensuse.org/repositories/security:/zeek/Debian_12/ /" | tee /etc/apt/sources.list.d/security:zeek.list'],
+         f'echo "deb [arch=amd64] https://download.opensuse.org/repositories/security:/zeek/Debian_{debian_version}/ /" | tee /etc/apt/sources.list.d/security.zeek.list'],
         ["apt-get", "update"]
     ]
 
@@ -1709,7 +1716,7 @@ def setup_vector():
         "apt-get update",
         "apt-get install -y vector",
         f"cp -r {VECTOR_SETUP_DIR}/. {VECTOR_DIR}/",
-        f"python3 {VECTOR_DIR}/configure_vector.py"
+        f"{sys.executable} -m monitoring.vector.configure_vector"
     ]
 
     for cmd in vector_commands:

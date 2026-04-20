@@ -27,7 +27,7 @@ $csrf_token = $securityHelper->generateCsrfToken();
 </div>
 <div class="logo-container">
     <a href="/landing">
-        <img id="logo-img" src="/assets/icons/heiST_dark.svg" alt="heiST" class="logo-icon" />
+        <img id="logo-img" src="/assets/icons/logo_dark.svg" alt="heiST" class="logo-icon" />
     </a>
 </div>
 <div class="login-container">

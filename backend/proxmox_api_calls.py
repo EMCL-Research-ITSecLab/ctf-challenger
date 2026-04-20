@@ -3,9 +3,8 @@ from dotenv import load_dotenv
 import requests
 import subprocess
 import fcntl
-import base64
-import time
-from cloud_init_ip_pool import ip_pool
+
+from backend.cloud_init_ip_pool import ip_pool
 
 load_dotenv()
 node = os.getenv("PROXMOX_HOSTNAME", "pve")
@@ -139,7 +138,7 @@ def shutdown_vm_api_call(machine):
     Shutdown a virtual machine in Proxmox.
     """
 
-    subprocess.run(["qm", "shutdown", str(machine.id)], check=True, capture_output=True)
+    subprocess.run(["qm", "stop", str(machine.id), "--skiplock"], check=True, capture_output=True)
 
 
 def vm_is_stopped_api_call(machine):

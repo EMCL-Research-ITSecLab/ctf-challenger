@@ -1,13 +1,10 @@
 import os
-import sys
 import subprocess
 
-BACKEND_DIR = "/root/heiST/backend"
-sys.path.append(BACKEND_DIR)
-from import_machine_templates import import_machine_templates
-from delete_machine_templates import delete_machine_templates
-from test_user_setup import test_user_setup
-from DatabaseClasses import ChallengeTemplate, MachineTemplate, NetworkTemplate, DomainTemplate, ConnectionTemplate
+from backend.import_machine_templates import import_machine_templates
+from backend.delete_machine_templates import delete_machine_templates
+from backend.tests.utils.test_user_setup import test_user_setup
+from backend.DatabaseClasses import ChallengeTemplate, MachineTemplate, NetworkTemplate, DomainTemplate, ConnectionTemplate
 
 OVA_FILES_DIR = "ova_files"
 if not os.path.exists(OVA_FILES_DIR):

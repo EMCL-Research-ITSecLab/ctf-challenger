@@ -1,11 +1,7 @@
 import os
 from playwright.sync_api import sync_playwright
-import sys
-
-UTILS_DIR_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "utils"))
-sys.path.append(UTILS_DIR_PATH)
-from upload_diskfile_ui import upload_diskfile_ui
-from delete_diskfile_ui import delete_diskfile_ui
+from utils.upload_diskfile_ui import upload_diskfile_ui
+from utils.delete_diskfile_ui import delete_diskfile_ui
 
 def ui_diskfile_upload_and_removal_test(username, password, file_path, prints=False):
     with sync_playwright() as p:

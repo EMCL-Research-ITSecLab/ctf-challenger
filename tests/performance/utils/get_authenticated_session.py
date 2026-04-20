@@ -2,7 +2,7 @@ import requests
 from dotenv import load_dotenv, find_dotenv
 import os
 import bs4 as BeautifulSoup
-from download_certificate import download_certificate
+from tests.performance.utils.download_certificate import download_certificate
 
 env_file = find_dotenv()
 load_dotenv(env_file)

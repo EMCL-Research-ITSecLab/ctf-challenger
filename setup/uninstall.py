@@ -1,15 +1,10 @@
-import requests
 from dotenv import load_dotenv
 import os
 from proxmoxer import ProxmoxAPI
 import subprocess
 import datetime
-import sys
 
 load_dotenv()
-
-BACKEND_DIR = "/root/heiST/backend"
-sys.path.append(BACKEND_DIR)
 
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "10.0.0.1")
 PROXMOX_USER = os.getenv("PROXMOX_USER", "root@pam")
@@ -44,7 +39,7 @@ OPENVPN_SERVER_IP = os.getenv("OPENVPN_SERVER_IP", "10.64.0.1")
 
 BACKEND_NETWORK_SUBNET = os.getenv("BACKEND_NETWORK_SUBNET", "10.0.0.1/24")
 BACKEND_NETWORK_ROUTER = os.getenv("BACKEND_NETWORK_ROUTER", "10.0.0.1")
-BACKEND_NETWORK_DEVICE = os.getenv("BACKEND_NETWORK_DEVICE", "vrt-backend")
+BACKEND_NETWORK_DEVICE = os.getenv("BACKEND_NETWORK_DEVICE", "vrt_backend")
 BACKEND_NETWORK_HOST_MIN = os.getenv("BACKEND_NETWORK_HOST_MIN", "10.0.0.2")
 BACKEND_NETWORK_HOST_MAX = os.getenv("BACKEND_NETWORK_HOST_MAX", "10.0.0.254")
 
@@ -165,7 +160,7 @@ def remove_openvpn_server():
     print("\tRemoving OpenVPN configuration files")
     openvpn_config_dir = "/etc/openvpn/"
     subprocess.run(["rm", "-rf", openvpn_config_dir], capture_output=True)
-    import os
+
     os.makedirs(openvpn_config_dir, exist_ok=True)
 
 

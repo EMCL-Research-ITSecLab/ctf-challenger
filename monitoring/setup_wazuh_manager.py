@@ -7,17 +7,13 @@ import os
 import sys
 import shlex
 import argparse
+import time
 from dotenv import load_dotenv
 sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
-UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
-
-# Import the script_helper module
-sys.path.append(UTILS_DIR)
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section,
     execute_remote_command, execute_remote_command_with_key, scp_file, scp_directory, Timer, time_function, DEBUG_MODE
 )
@@ -60,21 +56,6 @@ def setup_wazuh_manager():
         "sudo mv /tmp/manager /var/lib/wazuh/manager",
         "sudo chmod +x /var/lib/wazuh/manager/set_up_manager.sh",
         "sudo chmod +x /var/lib/wazuh/manager/utils/install_docker.sh",
-        "sudo /var/lib/wazuh/manager/utils/install_docker.sh",
-        # Hier ist das kritische Kommando mit Sonderzeichen:
-        " ".join([
-            "sudo", "/var/lib/wazuh/manager/set_up_manager.sh",
-            "--api-user", shlex.quote(WAZUH_API_USER),
-            "--api-pass", shlex.quote(WAZUH_API_PASS),
-            "--dashboard-user", shlex.quote(WAZUH_DASHBOARD_USER),
-            "--dashboard-pass", shlex.quote(WAZUH_DASHBOARD_PASS),
-            "--indexer-user", shlex.quote(WAZUH_INDEXER_USER),
-            "--indexer-pass", shlex.quote(WAZUH_INDEXER_PASS),
-            "--enrollment-pass", shlex.quote(WAZUH_ENROLLMENT_PASSWORD)
-        ]),
-        f"sudo ufw allow {WAZUH_REGISTRATION_PORT}/tcp",
-        f"sudo ufw allow {WAZUH_COMMUNICATION_PORT}/tcp",
-        f"sudo ufw allow {WAZUH_API_PORT}/tcp"
     ]
 
     for cmd in commands:
@@ -85,6 +66,127 @@ def setup_wazuh_manager():
             ssh_key_path=PROXMOX_SSH_KEYFILE,
             shell=True,
             timeout=1800
+        )
+
+    # Docker installation with retry logic
+    log_info("Installing Docker")
+    docker_install_successful = False
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            log_info(f"Docker installation attempt {attempt + 1}/{max_retries}")
+            result = execute_remote_command_with_key(
+                MONITORING_IP,
+                "sudo /var/lib/wazuh/manager/utils/install_docker.sh",
+                SSH_USER,
+                ssh_key_path=PROXMOX_SSH_KEYFILE,
+                shell=True,
+                timeout=600
+            )
+            log_debug(f"Docker installation script output: {result}")
+            docker_install_successful = True
+            log_success("Docker installed successfully")
+            break
+        except Exception as e:
+            log_warning(f"Docker installation attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                log_info("Waiting 15 seconds before retry...")
+                time.sleep(15)
+            else:
+                log_error("Docker installation failed after all retries")
+                raise
+
+    if not docker_install_successful:
+        log_error("Docker installation did not complete successfully")
+        raise Exception("Docker installation failed")
+
+    # Wait for Docker daemon to be fully ready with multiple verification attempts
+    log_info("Waiting for Docker daemon to start...")
+    time.sleep(20)
+
+    # Verify Docker is running with retries
+    docker_verification_successful = False
+    verify_attempts = 5
+    for verify_attempt in range(verify_attempts):
+        try:
+            log_info(f"Verifying Docker installation (attempt {verify_attempt + 1}/{verify_attempts})...")
+            output = execute_remote_command_with_key(
+                MONITORING_IP,
+                "sudo docker ps",
+                SSH_USER,
+                ssh_key_path=PROXMOX_SSH_KEYFILE,
+                shell=True,
+                timeout=30
+            )
+            log_debug(f"Docker ps output: {output}")
+            log_success("Docker daemon is running and responding")
+            docker_verification_successful = True
+            break
+        except Exception as e:
+            log_warning(f"Docker verification attempt {verify_attempt + 1} failed: {str(e)}")
+            if verify_attempt < verify_attempts - 1:
+                log_info("Waiting 10 seconds before next verification attempt...")
+                time.sleep(10)
+            else:
+                log_error("Docker verification failed after all attempts")
+                # Try to get more diagnostic information
+                try:
+                    log_info("Attempting to get Docker service status...")
+                    status_output = execute_remote_command_with_key(
+                        MONITORING_IP,
+                        "sudo systemctl status docker",
+                        SSH_USER,
+                        ssh_key_path=PROXMOX_SSH_KEYFILE,
+                        shell=True,
+                        timeout=30
+                    )
+                    log_debug(f"Docker service status: {status_output}")
+                except Exception as status_e:
+                    log_warning(f"Could not retrieve Docker status: {str(status_e)}")
+                raise
+
+    if not docker_verification_successful:
+        log_error("Docker could not be verified as running")
+        raise Exception("Docker verification failed")
+
+    # Run Wazuh setup script
+    log_section("Running Wazuh Setup Script")
+    wazuh_setup_cmd = " ".join([
+        "sudo", "/var/lib/wazuh/manager/set_up_manager.sh",
+        "--api-user", shlex.quote(WAZUH_API_USER),
+        "--api-pass", shlex.quote(WAZUH_API_PASS),
+        "--dashboard-user", shlex.quote(WAZUH_DASHBOARD_USER),
+        "--dashboard-pass", shlex.quote(WAZUH_DASHBOARD_PASS),
+        "--indexer-user", shlex.quote(WAZUH_INDEXER_USER),
+        "--indexer-pass", shlex.quote(WAZUH_INDEXER_PASS),
+        "--enrollment-pass", shlex.quote(WAZUH_ENROLLMENT_PASSWORD)
+    ])
+
+    execute_remote_command_with_key(
+        MONITORING_IP,
+        wazuh_setup_cmd,
+        SSH_USER,
+        ssh_key_path=PROXMOX_SSH_KEYFILE,
+        shell=True,
+        timeout=1800
+    )
+
+    # Configure firewall rules
+    firewall_commands = [
+        f"sudo ufw allow {WAZUH_REGISTRATION_PORT}/tcp",
+        f"sudo ufw allow {WAZUH_COMMUNICATION_PORT}/tcp",
+        f"sudo ufw allow {WAZUH_API_PORT}/tcp"
+    ]
+
+    for cmd in firewall_commands:
+        execute_remote_command_with_key(
+            MONITORING_IP,
+            cmd,
+            SSH_USER,
+            ssh_key_path=PROXMOX_SSH_KEYFILE,
+            shell=True,
+            timeout=60
         )
 
     log_success("Wazuh manager setup completed")

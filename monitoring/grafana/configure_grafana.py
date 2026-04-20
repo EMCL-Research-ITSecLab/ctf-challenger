@@ -29,12 +29,7 @@ requests.Session.request = no_ssl_verification_request
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
-UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
-
-# Import the script_helper module
-sys.path.append(UTILS_DIR)
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section, scp_file,
     execute_remote_command, execute_remote_command_with_key, Timer, time_function, DEBUG_MODE
 )
@@ -424,7 +419,7 @@ def setup_clickhouse(headers):
     # Check if ClickHouse plugin is installed
     if not is_plugin_installed(headers, CLICKHOUSE_PLUGIN_ID):
         log_info("ClickHouse plugin not installed, installing...")
-        execute_remote_command_with_key(GRAFANA_HOST_URL, f"sudo grafana-cli plugins install {CLICKHOUSE_PLUGIN_ID}", SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE, shell=True)
+        execute_remote_command_with_key(GRAFANA_HOST_URL, f"sudo grafana cli --homepath /usr/share/grafana plugins install {CLICKHOUSE_PLUGIN_ID}", SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE, shell=True)
         execute_remote_command_with_key(GRAFANA_HOST_URL, "sudo systemctl restart grafana-server", SSH_USER, ssh_key_path=PROXMOX_SSH_KEYFILE)
 
         time.sleep(10)

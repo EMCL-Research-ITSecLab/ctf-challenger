@@ -6,11 +6,11 @@ import math
 import subprocess
 import time
 import traceback
-from get_db_connection import get_db_connection
 import fcntl
 
-from warmup_challenge import warmup_challenge as warmup_challenge_backend
-from teardown_challenge import teardown_challenge as teardown_challenge_backend
+from backend.get_db_connection import get_db_connection
+from backend.warmup_challenge import warmup_challenge as warmup_challenge_backend
+from backend.teardown_challenge import teardown_challenge as teardown_challenge_backend
 
 load_dotenv()
 

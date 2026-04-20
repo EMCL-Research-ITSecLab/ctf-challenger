@@ -1,17 +1,11 @@
-import requests
 from dotenv import load_dotenv
 import os
-from proxmoxer import ProxmoxAPI
 import subprocess
 import datetime
 import time
-import sys
 import random
 
 load_dotenv()
-
-BACKEND_DIR = "/root/heiST/backend"
-sys.path.append(BACKEND_DIR)
 
 DATABASE_FILES_DIR = os.getenv("DATABASE_FILES_DIR", "/root/heiST/database")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "heist")

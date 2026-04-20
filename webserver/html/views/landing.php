@@ -14,7 +14,7 @@
     <div class="header-container">
         <div class="logo">
             <a href="/landing">
-                <img id="logo-img" src="/assets/icons/heiST_dark.svg" alt="heiST" />
+                <img id="logo-img" src="/assets/icons/logo_dark.svg" alt="heiST" />
             </a>
         </div>
         <nav>

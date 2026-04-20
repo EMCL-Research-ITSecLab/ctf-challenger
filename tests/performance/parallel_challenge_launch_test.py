@@ -1,10 +1,6 @@
 import threading
 import time
-import os
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
-
-from TestUser import TestUser
+from tests.performance.utils.TestUser import TestUser
 
 
 class SingleChallengeLaunchThread(threading.Thread):

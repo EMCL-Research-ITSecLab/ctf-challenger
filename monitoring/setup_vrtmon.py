@@ -18,28 +18,20 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR","/root/heiST/monitoring")
-UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
-BACKEND_PATH = os.getenv("BACKEND_FILES_DIR", "/root/heiST/backend")
-
-# Import the script_helper module
-sys.path.append(UTILS_DIR)
-sys.path.append(BACKEND_PATH)
-
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section,
     execute_remote_command, execute_remote_command_with_key, run_cmd, Timer, time_function, DEBUG_MODE
 )
-from proxmox_api_calls import add_network_device_api_call
+from backend.proxmox_api_calls import add_network_device_api_call
 
 # ==== CONFIGURATION CONSTANTS ====
 BRIDGE_NAME = os.getenv("WAZUH_NETWORK_DEVICE", "vrtmon")
 BRIDGE_IP = os.getenv("WAZUH_NETWORK_DEVICE_IPV6", "fd12:3456:789a:1::1")
 BRIDGE_CIDR = os.getenv("WAZUH_NETWORK_DEVICE_CIDR", "64")
 TARGET_NETWORK = os.getenv("WAZUH_NETWORK_SUBNET", "fd12:3456:789a:1::/64")
-WAZUH_REGISTRATION_PORT = os.getenv("WAZUH_REGISTRATION_PORT", "1515")
-WAZUH_COMMUNICATION_PORT = os.getenv("WAZUH_COMMUNICATION_PORT", "1514")
-BANNER_SERVER_PORT = os.getenv("BANNER_SERVER_PORT", 80)
+WAZUH_REGISTRATION_PORT = str(os.getenv("WAZUH_REGISTRATION_PORT", "1515"))
+WAZUH_COMMUNICATION_PORT = str(os.getenv("WAZUH_COMMUNICATION_PORT", "1514"))
+BANNER_SERVER_PORT = str(os.getenv("BANNER_SERVER_PORT", 80))
 ALLOWED_PORTS = [WAZUH_REGISTRATION_PORT, WAZUH_COMMUNICATION_PORT, BANNER_SERVER_PORT]
 MONITORING_IP = os.getenv("MONITORING_HOST", "10.0.0.103")
 MONITORING_ID = int(os.getenv("MONITORING_VM_ID", 9000))

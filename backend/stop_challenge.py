@@ -1,13 +1,8 @@
-from DatabaseClasses import *
-from proxmox_api_calls import *
 import subprocess
 import os
-import time
-import requests
-import urllib3
-from tenacity import retry, stop_after_attempt, wait_fixed
 from dotenv import load_dotenv, find_dotenv
-from get_db_connection import db_connection_context
+
+from backend.get_db_connection import db_connection_context
 
 load_dotenv(find_dotenv())
 
@@ -27,9 +22,6 @@ def stop_challenge(user_id):
         remove_user_iptables_rules(user_static_ip)
         mark_challenge_expired(challenge_id, db_conn)
         unassign_challenge_from_user(user_id, db_conn)
-
-
-
 
 
 def get_user_static_ip_and_challenge_id(user_id, db_conn):

@@ -1,9 +1,10 @@
 import subprocess
 import os
 from dotenv import load_dotenv
-from delete_user_config import delete_user_config
 import fcntl
 import time
+
+from backend.delete_user_config import delete_user_config
 
 load_dotenv()
 

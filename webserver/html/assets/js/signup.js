@@ -241,6 +241,7 @@ class SignupForm {
         for (const [keyword, fieldId] of Object.entries(this.errorMapping)) {
             if (data.message.toLowerCase().includes(keyword.toLowerCase())) {
                 this.showError(fieldId, data.message);
+
                 fieldFound = true;
                 if (keyword === 'Password') {
                     this.showError('confirm-password', data.message);

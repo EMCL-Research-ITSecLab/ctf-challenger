@@ -16,13 +16,9 @@ sys.stdout.reconfigure(line_buffering=True)
 
 # Load environment variables
 load_dotenv()
-MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring")
-UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 IPTABLES_FILE = os.getenv("IPTABLES_FILE", "/etc/iptables-backend/iptables.sh")
 
-# Import the script_helper module
-sys.path.append(UTILS_DIR)
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section,
     execute_remote_command, execute_remote_command_with_key, scp_file,
     run_cmd, run_cmd_with_realtime_output, remote_setup_user_ssh_keys,
@@ -34,7 +30,7 @@ MONITORING_VM_ID = os.getenv("MONITORING_VM_ID", "9000")
 MONITORING_VM_NAME = os.getenv("MONITORING_VM_NAME", "monitoring-vm")
 MONITORING_VM_MAC_ADDRESS = os.getenv("MONITORING_VM_MAC_ADDRESS", "00:16:3e:00:00:03")
 UBUNTU_BASE_SERVER_URL = os.getenv("UBUNTU_BASE_SERVER_URL")
-BACKEND_NETWORK_DEVICE = os.getenv("BACKEND_NETWORK_DEVICE", "vrt-backend")
+BACKEND_NETWORK_DEVICE = os.getenv("BACKEND_NETWORK_DEVICE", "vrt_backend")
 VM_MEMORY = os.getenv("MONITORING_VM_MEMORY", "10240")
 VM_CORES = os.getenv("MONITORING_VM_CORES", "2")
 STORAGE = os.getenv("PROXMOX_LVM_STORAGE", "local-lvm")
@@ -275,10 +271,12 @@ def install_packages():
     """Install base system packages on monitoring VM"""
     log_section("Installing Base Packages")
     commands = [
+        "sudo systemctl stop unattended-upgrades",
+        "sudo systemctl mask unattended-upgrades",
         "sudo apt install -y ntpsec-ntpdate",
         "sudo ntpdate time.google.com",
         "sudo apt update",
-        "sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y",
+        #"sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y",
         "sudo apt install -y wget curl gnupg2 software-properties-common apt-transport-https ufw"
     ]
 

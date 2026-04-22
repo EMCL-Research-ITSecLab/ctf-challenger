@@ -25,8 +25,8 @@ class UserHeader {
     updateLogo() {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
         this.logoImg.src = isDark
-            ? '/assets/icons/heiST_dark.svg'
-            : '/assets/icons/heiST.svg';
+            ? '/assets/icons/logo_dark.svg'
+            : '/assets/icons/logo_light.svg';
     }
 
     setupLogout() {

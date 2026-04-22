@@ -17,3 +17,4 @@ database/migrate_functions.sql
 setup/certs/
 setup/suricata-8.0.0.tar.gz
 setup/suricata-8.0.0/
+setup/credentials.md

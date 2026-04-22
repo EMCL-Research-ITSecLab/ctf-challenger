@@ -1,12 +1,8 @@
-import sys
-import os
 from playwright.sync_api import sync_playwright
 
-UTILS_DIR_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "utils"))
-sys.path.append(UTILS_DIR_PATH)
-from create_user_ui import create_user_ui
-from delete_user_ui import delete_user_ui
-from login_user_ui import login_user_ui
+from utils.create_user_ui import create_user_ui
+from utils.delete_user_ui import delete_user_ui
+from utils.login_user_ui import login_user_ui
 
 def ui_user_creation_and_deletion_test(username, email, password, prints=False):
     with sync_playwright() as p:

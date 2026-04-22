@@ -26,6 +26,7 @@ class RegistrationHandler
     private ICookie $cookie;
 
     private ISystem $system;
+    private IEnv $env;
 
     /**
      * @throws Exception
@@ -52,6 +53,7 @@ class RegistrationHandler
         $this->server = $server;
         $this->post = $post;
         $this->cookie = $cookie;
+        $this->env = $env;
         $this->route = "/signup";
 
         $this->databaseHelper = $databaseHelper ?? new DatabaseHelper($logger, $system);
@@ -208,6 +210,8 @@ class RegistrationHandler
             if (!$result || empty($result['user_id']) || empty($result['vpn_static_ip'])) {
                 throw new CustomException('Account creation failed', 500);
             }
+
+            $this->logger->logInfo("User account created successfully - User ID: {$result['user_id']}, Username: $this->username");
 
             return $result;
         } catch (CustomException $e) {

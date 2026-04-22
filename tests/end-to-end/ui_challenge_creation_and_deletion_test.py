@@ -1,11 +1,7 @@
 import os
 from playwright.sync_api import sync_playwright
-import sys
-
-UTILS_DIR_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "utils"))
-sys.path.append(UTILS_DIR_PATH)
-from setup_challenge_ui import setup_challenge_ui
-from delete_challenge_ui import delete_challenge_ui
+from utils.setup_challenge_ui import setup_challenge_ui
+from utils.delete_challenge_ui import delete_challenge_ui
 
 
 def ui_challenge_creation_and_deletion(username, password, path_to_yaml, upload_ova_files=False, prints=False):

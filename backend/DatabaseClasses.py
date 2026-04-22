@@ -1,4 +1,4 @@
-from subnet_calculations import nth_machine_ip
+from backend.subnet_calculations import nth_machine_ip
 
 
 class ChallengeTemplate:

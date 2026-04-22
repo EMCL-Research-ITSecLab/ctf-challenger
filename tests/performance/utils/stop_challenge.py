@@ -29,7 +29,7 @@ def stop_challenge(session, challenge_id, prints=False):
 
 
 if __name__ == "__main__":
-    from get_authenticated_session import get_authenticated_session
+    from tests.performance.utils.get_authenticated_session import get_authenticated_session
 
     for i in range(10):
         try:

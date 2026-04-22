@@ -2,11 +2,10 @@ import os
 import math
 from dotenv import load_dotenv, find_dotenv
 import time
-import sys
+
+from automatic_challenge_import.yaml_parser import retrieve_ova_data
 
 YAML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../automatic_challenge_import"))
-sys.path.append(YAML_DIR)
-from yaml_parser import retrieve_ova_data
 
 env_file = find_dotenv()
 load_dotenv(env_file)
@@ -111,7 +110,7 @@ def upload_all_ova_files(admin_session, path_to_yaml, prints=False):
 
 
 if __name__ == "__main__":
-    from get_authenticated_session import get_authenticated_session
+    from tests.performance.utils.get_authenticated_session import get_authenticated_session
 
     ADMIN_USER = os.getenv("ADMIN_USER", "admin")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")

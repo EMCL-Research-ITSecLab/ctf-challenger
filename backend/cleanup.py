@@ -1,11 +1,11 @@
 import os
-import signal
 import fcntl
-
 from dotenv import load_dotenv
-from stop_challenge import stop_challenge
 import threading
-from teardown_challenge import teardown_challenge
+
+from backend.stop_challenge import stop_challenge
+from backend.teardown_challenge import teardown_challenge
+
 load_dotenv()
 
 DATABASE_HOST = os.getenv("DB_HOST", "10.0.0.102")

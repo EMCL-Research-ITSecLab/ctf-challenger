@@ -7,10 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BACKEND_DIR = "/root/heiST/backend"
-sys.path.append(BACKEND_DIR)
-
-from backup_db import backup_database
+from setup.backup_db import backup_database
 
 DATABASE_NAME = os.getenv("DATABASE_NAME", "heist")
 DATABASE_USER = os.getenv("DATABASE_USER", "postgres")

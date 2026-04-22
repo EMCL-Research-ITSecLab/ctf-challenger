@@ -1,18 +1,11 @@
-import sys
 import os
 import time
 
-BACKEND_DIR = "/root/heiST/backend"
-TEST_UTILS_DIR = os.path.join(BACKEND_DIR, "tests", "utils")
-
-sys.path.append(TEST_UTILS_DIR)
-sys.path.append(BACKEND_DIR)
-
-from mock_db import MockDatabase
-from test_user_setup import test_user_setup
-from get_user_config import get_user_config
-from delete_user_config import delete_user_config
-from check import check
+from backend.tests.utils.mock_db import MockDatabase
+from backend.tests.utils.test_user_setup import test_user_setup
+from backend.get_user_config import get_user_config
+from backend.delete_user_config import delete_user_config
+from backend.tests.utils.check import check
 
 
 def test_backend_user_config_handling():

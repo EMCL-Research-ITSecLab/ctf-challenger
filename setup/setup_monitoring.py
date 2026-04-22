@@ -19,8 +19,7 @@ MONITORING_FILES_DIR = os.getenv("MONITORING_FILES_DIR", "/root/heiST/monitoring
 UTILS_DIR = f"{MONITORING_FILES_DIR}/utils"
 
 # Import the script_helper module
-sys.path.append(UTILS_DIR)
-from script_helper import (
+from monitoring.utils.script_helper import (
     log_info, log_debug, log_error, log_warning, log_success, log_section,
     run_cmd, run_cmd_with_realtime_output, Timer, time_function, DEBUG_MODE
 )
@@ -434,14 +433,22 @@ def validate_scripts() -> Tuple[bool, List[str]]:
 
 def get_script_command(script_path: str) -> List[str]:
     """
-    Build the command to execute a script with appropriate flags
+    Build the command to execute a script with appropriate flags, convert a path into a module execution to preserve structure
     """
-    command = [sys.executable, script_path]
+
+    if MONITORING_FILES_DIR in script_path:
+        filename = Path(script_path).name.replace(".py", "")
+        module_structure = Path(script_path).parent.relative_to(Path(MONITORING_FILES_DIR).parent).parts
+        command = [sys.executable, "-m", ".".join(module_structure + (filename,))]
+    else:
+        raise Exception(f"Script path {script_path} is not a valid script path")
 
     if DEBUG_MODE:
         command.append("--debug")
 
     return command
+
+
 
 
 # ===== SCRIPT EXECUTION =====

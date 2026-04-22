@@ -1,15 +1,15 @@
 from flask import Flask, request, send_file, redirect
 import psycopg2
 from dotenv import load_dotenv
-from cloud_init_ip_pool import ip_pool
 import os
 
-from launch_challenge import launch_challenge as launch_challenge_backend
-from stop_challenge import stop_challenge as stop_challenge_backend
-from import_machine_templates import import_machine_templates as import_machine_template_backend
-from delete_machine_templates import delete_machine_templates as delete_machine_template_backend
-from get_user_config import get_user_config as get_user_config_backend
-from delete_user_config import delete_user_config as delete_user_config_backend
+from backend.cloud_init_ip_pool import ip_pool
+from backend.launch_challenge import launch_challenge as launch_challenge_backend
+from backend.stop_challenge import stop_challenge as stop_challenge_backend
+from backend.import_machine_templates import import_machine_templates as import_machine_template_backend
+from backend.delete_machine_templates import delete_machine_templates as delete_machine_template_backend
+from backend.get_user_config import get_user_config as get_user_config_backend
+from backend.delete_user_config import delete_user_config as delete_user_config_backend
 
 load_dotenv()
 
@@ -211,4 +211,5 @@ def delete_user_config():
     return {"message": "User config deleted", "success": True}, 200
     
 
-app.run(host=BACKEND_HOST, port=int(BACKEND_PORT), ssl_context=(BACKEND_CERTIFICATE_FILE, BACKEND_CERTIFICATE_KEY_FILE))
+if __name__ == '__main__':
+    app.run(host=BACKEND_HOST, port=int(BACKEND_PORT), ssl_context=(BACKEND_CERTIFICATE_FILE, BACKEND_CERTIFICATE_KEY_FILE))

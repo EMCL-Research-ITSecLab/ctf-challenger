@@ -1,25 +1,18 @@
 import subprocess
-import sys
 import os
 import time
 
-BACKEND_DIR = "/root/heiST/backend"
-TEST_UTILS_DIR = os.path.join(BACKEND_DIR, "tests", "utils")
-
-sys.path.append(TEST_UTILS_DIR)
-sys.path.append(BACKEND_DIR)
-
-from mock_db import MockDatabase
-from test_challenge_template_setup import test_plain_ubuntu_setup
-from get_user_config import get_user_config
-from delete_user_config import delete_user_config
-from import_machine_templates import import_machine_templates
-from delete_machine_templates import delete_machine_templates
-from launch_challenge import launch_challenge
-from stop_challenge import stop_challenge
-from proxmox_api_calls import vm_exists_api_call, vm_is_stopped_api_call, network_device_exists_api_call
-from DatabaseClasses import Challenge, Machine, Network, Connection, Domain
-from check import check
+from backend.tests.utils.mock_db import MockDatabase
+from backend.tests.utils.test_challenge_template_setup import test_plain_ubuntu_setup
+from backend.get_user_config import get_user_config
+from backend.delete_user_config import delete_user_config
+from backend.import_machine_templates import import_machine_templates
+from backend.delete_machine_templates import delete_machine_templates
+from backend.launch_challenge import launch_challenge
+from backend.stop_challenge import stop_challenge
+from backend.proxmox_api_calls import vm_exists_api_call, vm_is_stopped_api_call, network_device_exists_api_call
+from backend.DatabaseClasses import Challenge, Machine, Network, Connection, Domain
+from backend.tests.utils.check import check
 from scapy.all import sr1, IP, ICMP
 
 

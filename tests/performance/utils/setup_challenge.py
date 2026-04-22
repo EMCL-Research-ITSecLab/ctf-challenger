@@ -2,12 +2,10 @@ import os
 from dotenv import load_dotenv, find_dotenv
 import time
 import datetime
-import sys
-from upload_ova_file import upload_all_ova_files
+from tests.performance.utils.upload_ova_file import upload_all_ova_files
+from automatic_challenge_import.yaml_parser import yaml_to_create_challenge_form_data
 
 YAML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../automatic_challenge_import"))
-sys.path.append(YAML_DIR)
-from yaml_parser import yaml_to_create_challenge_form_data
 
 
 env_file = find_dotenv()
@@ -53,7 +51,7 @@ def setup_challenge(admin_session, path_to_yaml, upload_ovas=True, prints=False)
 
 
 if __name__ == "__main__":
-    from get_authenticated_session import get_authenticated_session
+    from tests.performance.utils.get_authenticated_session import get_authenticated_session
 
     ADMIN_USER = os.getenv("ADMIN_USER", "admin")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")

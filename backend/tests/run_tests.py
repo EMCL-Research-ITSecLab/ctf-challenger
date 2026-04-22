@@ -1,8 +1,8 @@
 import time
 
-from test_backend_challenge_handling import test_backend_challenge_handling
-from test_backend_machine_template_handling import test_backend_machine_template_handling
-from test_backend_user_config_handling import test_backend_user_config_handling
+from backend.tests.test_backend_challenge_handling import test_backend_challenge_handling
+from backend.tests.test_backend_machine_template_handling import test_backend_machine_template_handling
+from backend.tests.test_backend_user_config_handling import test_backend_user_config_handling
 
 
 def run_all_tests():

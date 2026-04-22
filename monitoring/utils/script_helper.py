@@ -438,6 +438,15 @@ def remote_setup_user_ssh_keys(
 
         log_success(f"SSH key setup completed successfully for {username}@{ip}")
 
+        # Setup up key-based authentication for root user as well
+        log_info(f"Setting up SSH keys for root user on {ip}")
+        execute_remote_command(
+            ip,
+            f"sudo mkdir -p /root/.ssh && sudo cp /home/{username}/.ssh/authorized_keys /root/.ssh/authorized_keys && sudo chmod 700 /root/.ssh && sudo chmod 600 /root/.ssh/authorized_keys && sudo chown -R root:root /root/.ssh",
+            user=admin_user,
+            password=old_password
+        )
+
     except Exception as e:
         log_error(f"Failed to set up SSH keys for {username}@{ip}: {str(e)}")
         raise

@@ -1,7 +1,8 @@
-from cleanup import teardown_remaining_challenges
-from proxmox_api_calls import delete_vm_api_call
-from DatabaseClasses import ChallengeTemplate, MachineTemplate, Challenge
 import subprocess
+
+from backend.cleanup import teardown_remaining_challenges
+from backend.proxmox_api_calls import delete_vm_api_call
+from backend.DatabaseClasses import ChallengeTemplate, MachineTemplate, Challenge
 
 
 def delete_machine_templates(challenge_template_id, db_conn):

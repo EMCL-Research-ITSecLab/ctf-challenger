@@ -1,11 +1,6 @@
-import sys
-import os
 from login_user_ui import login_user_ui
 from upload_diskfile_ui import upload_all_diskfiles_ui
-
-YAML_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../automatic_challenge_import"))
-sys.path.append(YAML_DIR)
-from yaml_parser import yaml_to_dict
+from automatic_challenge_import.yaml_parser import yaml_to_dict
 
 
 def setup_challenge_ui(page, path_to_yaml, username=None, password=None, login=False, upload_ova_files=False, prints=False):

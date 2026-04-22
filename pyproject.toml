@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "heiST"
+version = "0.1.0"
+description = "heiST automation and backend tooling"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "automatic_challenge_import*",
+    "backend*",
+    "monitoring*",
+    "setup*",
+    "tests*",
+]
+exclude = [
+    "tests.end-to-end*",
+    "**.__pycache__*",
+]
+

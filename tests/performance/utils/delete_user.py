@@ -1,4 +1,4 @@
-from get_authenticated_session import get_authenticated_session
+from tests.performance.utils.get_authenticated_session import get_authenticated_session
 from dotenv import load_dotenv, find_dotenv
 import os
 

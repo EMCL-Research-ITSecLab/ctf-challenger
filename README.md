@@ -49,7 +49,7 @@
 
 ### Prerequisites
 - Proxmox VE 9.1-1, other versions might work but are not tested yet
-- Python 3.x, the [installer](setup/bin/install) will install version 3.12 to ensure compatibility with all dependencies during the installation process
+- Python 3.x, the [installer](bin/install) will install version 3.12 to ensure compatibility with all dependencies during the installation process
 - `root` access to the Proxmox VE host, including the `root` password, Proxmox's hostname, and information about the network configuration (internal and external IP address if the application will run in a NAT environment)
 
 ### Quick Installation
